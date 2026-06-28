@@ -1,3 +1,5 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -70,6 +72,35 @@ describe("startAgentRun", () => {
     expect(events.at(-1)).toEqual({ type: "end", status: "succeeded" });
   });
 
+  test("spawns Windows cmd shims through the command adapter", async () => {
+    if (process.platform !== "win32") return;
+
+    const root = mkdtempSync(join(tmpdir(), "agent-nexus-launcher-cmd-"));
+    const cmdPath = join(root, "fake-agent.cmd");
+    writeFileSync(cmdPath, `@echo off\r\n"${process.execPath}" "${fakeAgentPath}" json-success\r\n`, "utf8");
+
+    const runs = createRunService({ idGenerator: () => "run_cmd", now: () => 1 });
+    const run = runs.create(request());
+    const def = {
+      ...fakeDef("json-success"),
+      bin: cmdPath,
+      buildArgs: () => [],
+    };
+
+    const handle = startAgentRun({
+      runs,
+      runId: run.id,
+      request: request(),
+      def,
+      resolvedPath: cmdPath
+    });
+
+    await expect(handle.done).resolves.toMatchObject({ status: "succeeded", exitCode: 0 });
+    expect(runs.eventsAfter(run.id, 0).map((event) => event.data)).toEqual(
+      expect.arrayContaining([{ type: "text_delta", delta: "echo:hello" }])
+    );
+  });
+
   test("cancels a running child and records one terminal canceled event", async () => {
     const runs = createRunService({ idGenerator: () => "run_cancel", now: () => 1 });
     const run = runs.create(request({ prompt: "wait" }));
@@ -127,6 +158,53 @@ describe("startAgentRun", () => {
     expect(handle.child).toBeNull();
     expect(runs.eventsAfter(run.id, 0).map((event) => event.data)).toEqual([
       { type: "end", status: "failed" }
+    ]);
+  });
+
+  test("fails a run when the stream reports an error even if the process exits zero", async () => {
+    const runs = createRunService({ idGenerator: () => "run_stream_error", now: () => 1 });
+    const run = runs.create(request());
+
+    const handle = startAgentRun({
+      runs,
+      runId: run.id,
+      request: request(),
+      def: fakeDef("json-error-zero"),
+      resolvedPath: process.execPath
+    });
+
+    await expect(handle.done).resolves.toMatchObject({
+      status: "failed",
+      error: "subscription missing",
+      errorCode: "InvalidSubscription",
+      exitCode: 0
+    });
+    expect(runs.eventsAfter(run.id, 0).map((event) => event.data)).toEqual([
+      expect.objectContaining({ type: "error", message: "subscription missing", code: "InvalidSubscription" }),
+      { type: "end", status: "failed" }
+    ]);
+  });
+
+  test("closes stdin for agents that receive prompts through argv", async () => {
+    const runs = createRunService({ idGenerator: () => "run_argv_prompt", now: () => 1 });
+    const run = runs.create(request());
+    const def = {
+      ...fakeDef("json-stdin-close"),
+      promptViaStdin: false
+    };
+
+    const handle = startAgentRun({
+      runs,
+      runId: run.id,
+      request: request(),
+      def,
+      resolvedPath: process.execPath
+    });
+
+    await expect(handle.done).resolves.toMatchObject({ status: "succeeded", exitCode: 0 });
+    expect(runs.eventsAfter(run.id, 0).map((event) => event.data)).toEqual([
+      { type: "text_delta", delta: "stdin closed" },
+      { type: "end", status: "succeeded" }
     ]);
   });
 });

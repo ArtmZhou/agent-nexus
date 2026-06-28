@@ -7,7 +7,7 @@ export const codexDef: RuntimeAgentDef = {
   bin: "codex",
   versionArgs: ["--version"],
   fallbackModels: [
-    modelOption("default", "Default"),
+    modelOption("", "Default"),
     modelOption("gpt-5", "GPT-5"),
   ],
   listModels: {

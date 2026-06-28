@@ -124,4 +124,34 @@ describe("json event stream parser", () => {
       { type: "error", message: "oops", details: "oops" }
     ]);
   });
+
+  test("extracts nested provider error details", () => {
+    const { events, parser } = collectEvents();
+
+    parser.write(JSON.stringify({
+      type: "error",
+      error: {
+        name: "APIError",
+        data: {
+          code: "InvalidSubscription",
+          message: "subscription expired"
+        }
+      }
+    }) + "\n");
+
+    expect(events).toEqual([
+      {
+        type: "error",
+        message: "subscription expired",
+        code: "InvalidSubscription",
+        details: {
+          name: "APIError",
+          data: {
+            code: "InvalidSubscription",
+            message: "subscription expired"
+          }
+        }
+      }
+    ]);
+  });
 });

@@ -7,7 +7,7 @@ export const opencodeDef: RuntimeAgentDef = {
   bin: "opencode",
   versionArgs: ["--version"],
   fallbackModels: [
-    modelOption("opencode/default", "OpenCode Default"),
+    modelOption("", "Default"),
     modelOption("anthropic/claude-sonnet-4", "Claude Sonnet 4"),
     modelOption("openai/gpt-5", "GPT-5"),
   ],
@@ -16,11 +16,13 @@ export const opencodeDef: RuntimeAgentDef = {
     parse: parseLineModels,
   },
   buildArgs: (context) => {
-    const args = ["run", "--output-format", "json"];
+    const args = ["run", "--format", "json"];
     if (context.options?.model) args.push("--model", context.options.model);
+    if (context.cwd) args.push("--dir", context.cwd);
+    args.push(context.prompt);
     return args;
   },
-  promptViaStdin: true,
+  promptViaStdin: false,
   promptInputFormat: "text",
   streamFormat: "json-event-stream",
   eventParser: "opencode",

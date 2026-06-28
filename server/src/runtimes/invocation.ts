@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { prepareAgentCommand } from "./command.js";
 
 export type ProbeInvocationOptions = {
   executablePath: string;
@@ -27,15 +28,17 @@ type ExecFileError = Error & {
 
 export function execFileProbe(options: ProbeInvocationOptions): Promise<ProbeInvocationResult> {
   return new Promise((resolve) => {
+    const command = prepareAgentCommand(options.executablePath, options.args, process.platform, options.env);
     execFile(
-      options.executablePath,
-      options.args,
+      command.executablePath,
+      command.args,
       {
         cwd: options.cwd,
         env: { ...process.env, ...(options.env ?? {}) },
         maxBuffer: options.maxBuffer ?? 1024 * 1024,
         shell: false,
         timeout: options.timeoutMs,
+        windowsVerbatimArguments: command.windowsVerbatimArguments,
         windowsHide: true,
       },
       (error, stdout, stderr) => {

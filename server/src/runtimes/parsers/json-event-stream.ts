@@ -176,8 +176,16 @@ export function usageFrom(value: unknown): TokenUsage | undefined {
 
 export function errorEvent(error: unknown, fallbackCode?: unknown): RunEvent {
   if (isRecord(error)) {
-    const message = firstString(error.message, error.error, error.detail, error.type) ?? "Agent stream error";
-    const rawCode = firstString(error.code, error.type, fallbackCode);
+    const nestedData = isRecord(error.data) ? error.data : null;
+    const message = firstString(
+      error.message,
+      error.error,
+      error.detail,
+      nestedData?.message,
+      error.type,
+      error.name,
+    ) ?? "Agent stream error";
+    const rawCode = firstString(error.code, nestedData?.code, error.type, error.name, fallbackCode);
     const event: Extract<RunEvent, { type: "error" }> = { type: "error", message };
     if (rawCode && rawCode !== "error") event.code = rawCode;
     if (hasStructuredErrorDetails(error)) event.details = error;

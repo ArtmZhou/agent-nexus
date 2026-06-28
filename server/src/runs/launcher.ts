@@ -3,6 +3,7 @@ import type { CreateRunRequest, RunEvent, RunStatusBody } from "@agent-nexus/sha
 import { classifyRunCloseStatus } from "./lifecycle.js";
 import type { RunService } from "./service.js";
 import { attachAcpSession, type AttachedAcpSession } from "../runtimes/acp.js";
+import { prepareAgentCommand } from "../runtimes/command.js";
 import { AgentLaunchResolutionError, resolveAgentLaunchConfig } from "../runtimes/launch.js";
 import { createClaudeStreamJsonParser } from "../runtimes/parsers/claude-stream.js";
 import { createJsonEventStreamParser, type StreamChunkParser } from "../runtimes/parsers/json-event-stream.js";
@@ -38,6 +39,7 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
   let acpSession: AttachedAcpSession | null = null;
   let cancelRequested = false;
   let completedCleanly = false;
+  let streamError: Extract<RunEvent, { type: "error" }> | null = null;
   let terminalPromiseResolve: (body: RunStatusBody) => void = () => undefined;
   const done = new Promise<RunStatusBody>((resolve) => {
     terminalPromiseResolve = resolve;
@@ -60,12 +62,14 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
       }
     });
 
-    child = spawn(launch.executablePath, args, {
+    const command = prepareAgentCommand(launch.executablePath, args, process.platform, launch.env);
+    child = spawn(command.executablePath, command.args, {
       cwd,
       detached: process.platform !== "win32",
       env: launch.env,
       shell: false,
       windowsHide: true,
+      windowsVerbatimArguments: command.windowsVerbatimArguments,
       stdio: "pipe"
     });
 
@@ -78,6 +82,9 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
       if (event.type === "end") {
         completedCleanly = event.status === "succeeded";
         return;
+      }
+      if (event.type === "error") {
+        streamError = event;
       }
       void options.runs.emit(options.runId, event);
     };
@@ -152,6 +159,16 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
     });
 
     if (status === "succeeded") {
+      if (streamError) {
+        terminalPromiseResolve(await options.runs.fail(options.runId, {
+          message: streamError.message,
+          code: streamError.code ?? "agent.stream_error",
+          exitCode: input.exitCode,
+          signal: input.signal
+        }));
+        return;
+      }
+
       terminalPromiseResolve(await options.runs.finish(options.runId, {
         exitCode: input.exitCode,
         signal: input.signal
@@ -213,7 +230,12 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
 }
 
 function writePromptIfNeeded(def: RuntimeAgentDef, child: ChildProcessWithoutNullStreams, prompt: string): void {
-  if (!def.promptViaStdin || def.streamFormat === "acp-json-rpc") {
+  if (def.streamFormat === "acp-json-rpc") {
+    return;
+  }
+
+  if (!def.promptViaStdin) {
+    child.stdin.end();
     return;
   }
 
