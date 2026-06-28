@@ -157,6 +157,11 @@ describe("startAgentRun", () => {
     });
     expect(handle.child).toBeNull();
     expect(runs.eventsAfter(run.id, 0).map((event) => event.data)).toEqual([
+      expect.objectContaining({
+        type: "error",
+        message: "Fake Agent executable could not be resolved",
+        code: "agent.executable_not_found"
+      }),
       { type: "end", status: "failed" }
     ]);
   });

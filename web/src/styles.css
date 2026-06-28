@@ -91,15 +91,28 @@ h3 {
 .app-shell {
   min-height: 100vh;
   padding: 18px;
+  display: grid;
 }
 
 .chat-workbench {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   width: min(100%, 1180px);
-  min-height: calc(100vh - 36px);
+  height: calc(100vh - 36px);
   margin: 0 auto;
+  min-height: 0;
+}
+
+.top-bar,
+.advanced-panel,
+.composer {
+  flex: 0 0 auto;
+}
+
+.message-stream {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .top-bar,
@@ -188,7 +201,7 @@ button:focus-visible {
   display: grid;
   align-content: start;
   gap: 12px;
-  min-height: 360px;
+  min-height: 0;
   overflow: auto;
   padding-right: 2px;
 }
@@ -196,7 +209,9 @@ button:focus-visible {
 .empty-state {
   display: grid;
   align-content: center;
-  min-height: 360px;
+  justify-items: start;
+  min-height: 240px;
+  height: 100%;
   padding: 30px;
   background: var(--surface);
   border: 1px dashed var(--line-strong);
@@ -603,7 +618,7 @@ button:focus-visible {
   }
 
   .chat-workbench {
-    min-height: calc(100vh - 20px);
+    height: calc(100vh - 20px);
   }
 
   .top-bar {

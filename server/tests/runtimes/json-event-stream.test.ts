@@ -154,4 +154,19 @@ describe("json event stream parser", () => {
       }
     ]);
   });
+
+  test("stays silent for progress events that carry no displayable content", () => {
+    const { events, parser } = collectEvents();
+
+    parser.write(
+      [
+        { type: "item.started", id: "step-1" },
+        { type: "item.updated", id: "step-1", progress: 0.5 }
+      ]
+        .map((event) => JSON.stringify(event))
+        .join("\n") + "\n"
+    );
+
+    expect(events).toEqual([]);
+  });
 });

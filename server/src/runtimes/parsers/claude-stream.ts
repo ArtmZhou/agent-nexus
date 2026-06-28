@@ -6,6 +6,7 @@ import {
   errorEvent,
   firstString,
   isRecord,
+  numberValue,
   usageFrom
 } from "./json-event-stream.js";
 
@@ -39,6 +40,12 @@ export function normalizeClaudeStreamJsonEvent(value: unknown): RunEvent[] {
   switch (kind) {
     case "system":
       return systemEvents(value);
+    case "assistant":
+      return assistantWrapperEvents(value);
+    case "user":
+      return userWrapperEvents(value);
+    case "result":
+      return resultWrapperEvents(value);
     case "message_start":
       return usageEvent(value.message);
     case "message_delta":
@@ -54,7 +61,7 @@ export function normalizeClaudeStreamJsonEvent(value: unknown): RunEvent[] {
     case "error":
       return [errorEvent(value.error ?? value, value.code)];
     default:
-      return [diagnostic("unhandled_json_event", { event: value })];
+      return [];
   }
 }
 
@@ -82,8 +89,13 @@ export function createClaudeTurnBookkeeping(): ClaudeTurnBookkeeping {
         this.acceptEvent(event);
       }
 
-      if (isRecord(value) && value.type === "message_stop" && status === "running") {
-        status = "succeeded";
+      if (isRecord(value) && status === "running") {
+        const kind = firstString(value.type);
+        if (kind === "message_stop") status = "succeeded";
+        if (kind === "result") {
+          const subtype = firstString(value.subtype);
+          status = !subtype || subtype === "success" ? "succeeded" : "failed";
+        }
       }
     },
     acceptEvent(event) {
@@ -112,10 +124,58 @@ function systemEvents(value: JsonRecord): RunEvent[] {
   ];
 }
 
-function contentBlockStartEvents(block: unknown): RunEvent[] {
+function assistantWrapperEvents(value: JsonRecord): RunEvent[] {
+  const message = isRecord(value.message) ? value.message : value;
+  return contentBlocksToEvents(message.content);
+}
+
+function userWrapperEvents(value: JsonRecord): RunEvent[] {
+  const message = isRecord(value.message) ? value.message : value;
+  return contentBlocksToEvents(message.content).filter(
+    (event) => event.type === "tool_result"
+  );
+}
+
+function resultWrapperEvents(value: JsonRecord): RunEvent[] {
+  const events: RunEvent[] = [];
+
+  const subtype = firstString(value.subtype);
+  const isError = subtype && subtype !== "success";
+  if (isError) {
+    const message =
+      firstString(value.error, value.message, isRecord(value.result) ? value.result.message : undefined) ??
+      subtype;
+    events.push({ type: "error", message, code: subtype, details: value });
+  }
+
+  events.push(...usageEvent(value));
+  return events;
+}
+
+function contentBlocksToEvents(content: unknown): RunEvent[] {
+  if (!Array.isArray(content)) return [];
+
+  const events: RunEvent[] = [];
+  for (const block of content) {
+    events.push(...contentBlockToEvents(block));
+  }
+  return events;
+}
+
+function contentBlockToEvents(block: unknown): RunEvent[] {
   if (!isRecord(block)) return [];
 
   const kind = firstString(block.type);
+  if (kind === "text") {
+    const text = firstString(block.text) ?? contentText(block);
+    return text ? [{ type: "text_delta", delta: text }] : [];
+  }
+
+  if (kind === "thinking") {
+    const text = firstString(block.thinking) ?? firstString(block.text);
+    return text ? [{ type: "thinking_delta", delta: text }] : [];
+  }
+
   if (kind === "tool_use") {
     return [
       {
@@ -141,6 +201,10 @@ function contentBlockStartEvents(block: unknown): RunEvent[] {
   return [];
 }
 
+function contentBlockStartEvents(block: unknown): RunEvent[] {
+  return contentBlockToEvents(block);
+}
+
 function contentBlockDeltaEvents(delta: unknown): RunEvent[] {
   if (!isRecord(delta)) return [];
 
@@ -161,7 +225,14 @@ function contentBlockDeltaEvents(delta: unknown): RunEvent[] {
 function usageEvent(value: unknown): RunEvent[] {
   if (!isRecord(value)) return [];
   const usage = usageFrom(value.usage) ?? usageFrom(value);
-  return usage ? [{ type: "usage", usage }] : [];
+  if (!usage) return [];
+
+  const event: Extract<RunEvent, { type: "usage" }> = { type: "usage", usage };
+  const costUsd = numberValue(value.total_cost_usd) ?? numberValue(value.cost_usd) ?? numberValue(value.cost);
+  const durationMs = numberValue(value.duration_ms) ?? numberValue(value.duration_api_ms);
+  if (costUsd !== undefined) event.costUsd = costUsd;
+  if (durationMs !== undefined) event.durationMs = durationMs;
+  return [event];
 }
 
 function terminalStatus(status: Exclude<RunStatus, "queued">): Exclude<RunStatus, "queued" | "running"> {

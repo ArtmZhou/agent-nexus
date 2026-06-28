@@ -238,7 +238,7 @@ function normalizeCursorLikeEvent(value: JsonRecord): RunEvent[] {
   if (kind === "error" || value.error) return [errorEvent(value.error ?? value, value.code)];
 
   const text = contentText(value.content) ?? contentText(value.text) ?? contentText(value.message);
-  return text ? [{ type: "text_delta", delta: text }] : [diagnostic("unhandled_json_event", { event: value })];
+  return text ? [{ type: "text_delta", delta: text }] : [];
 }
 
 function textEventsFromRecord(value: JsonRecord): RunEvent[] {

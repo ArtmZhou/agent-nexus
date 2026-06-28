@@ -1,4 +1,4 @@
-import type { RunEvent, RunStatusBody, TokenUsage } from "@agent-nexus/shared";
+import type { RunEvent, RunStatus, RunStatusBody, TokenUsage } from "@agent-nexus/shared";
 import { MarkdownLite } from "./MarkdownLite.js";
 
 type MessageStreamProps = {
@@ -15,14 +15,23 @@ type TranscriptTool = {
   isError?: boolean;
 };
 
+type TranscriptStatus = {
+  label: string;
+  detail?: string;
+};
+
 type Transcript = {
   assistantText: string;
   thinking: string;
   tools: TranscriptTool[];
   stderr: string;
   errors: Array<{ message: string; code?: string }>;
+  statuses: TranscriptStatus[];
+  diagnostics: Array<{ name: string; message: string }>;
   usage: TokenUsage | null;
 };
+
+const terminalStatuses = new Set<RunStatus>(["succeeded", "failed", "canceled"]);
 
 export function MessageStream({ currentRun, events, prompt }: MessageStreamProps) {
   const transcript = buildTranscript(events);
@@ -34,6 +43,11 @@ export function MessageStream({ currentRun, events, prompt }: MessageStreamProps
     transcript.stderr.length > 0 ||
     transcript.errors.length > 0 ||
     transcript.usage !== null;
+  const isTerminal = currentRun !== null && terminalStatuses.has(currentRun.status);
+  const runError = currentRun?.error?.trim() ? currentRun.error : null;
+  const runErrorCode = currentRun?.errorCode ?? undefined;
+  const showRunError = isTerminal && runError !== null && !transcript.errors.some((error) => error.message === runError);
+  const placeholderText = placeholderFor(currentRun, transcript);
 
   return (
     <section className="message-stream" role="log" aria-label="Messages">
@@ -56,10 +70,10 @@ export function MessageStream({ currentRun, events, prompt }: MessageStreamProps
         <article className="message assistant-message">
           <div className="message-label">Agent</div>
           <div className="message-body">
-            {hasAssistantOutput ? (
+            {transcript.assistantText.length > 0 ? (
               <MarkdownLite text={transcript.assistantText} />
             ) : (
-              <p className="muted">Waiting for streamed output.</p>
+              !hasAssistantOutput && <p className="muted">{placeholderText}</p>
             )}
 
             {transcript.thinking && (
@@ -91,12 +105,46 @@ export function MessageStream({ currentRun, events, prompt }: MessageStreamProps
               </div>
             ))}
 
+            {showRunError && (
+              <div className="inline-error" key="run-error">
+                <strong>{runErrorCode ?? currentRun?.status ?? "error"}</strong>
+                <span>{runError}</span>
+              </div>
+            )}
+
+            {transcript.diagnostics.length > 0 && (
+              <details className="message-detail" open>
+                <summary>Diagnostics</summary>
+                {transcript.diagnostics.map((diagnostic, index) => (
+                  <p key={`${diagnostic.name}-${index}`}>
+                    <strong>{diagnostic.name}</strong>
+                    {diagnostic.message && ` — ${diagnostic.message}`}
+                  </p>
+                ))}
+              </details>
+            )}
+
             {transcript.usage && <p className="usage-line">{formatUsage(transcript.usage)}</p>}
           </div>
         </article>
       )}
     </section>
   );
+}
+
+function placeholderFor(currentRun: RunStatusBody | null, transcript: Transcript): string {
+  if (currentRun && terminalStatuses.has(currentRun.status)) {
+    if (currentRun.status === "canceled") return "Run canceled.";
+    if (currentRun.status === "failed") return currentRun.error?.trim() ? currentRun.error : "Run failed.";
+    return "Run finished without text output.";
+  }
+
+  const latestStatus = transcript.statuses.at(-1);
+  if (latestStatus) {
+    return latestStatus.detail ? `${latestStatus.label}: ${latestStatus.detail}` : `Status: ${latestStatus.label}`;
+  }
+
+  return "Waiting for streamed output.";
 }
 
 export function buildTranscript(events: RunEvent[]): Transcript {
@@ -106,6 +154,8 @@ export function buildTranscript(events: RunEvent[]): Transcript {
     tools: [],
     stderr: "",
     errors: [],
+    statuses: [],
+    diagnostics: [],
     usage: null
   };
 
@@ -132,6 +182,14 @@ export function buildTranscript(events: RunEvent[]): Transcript {
     if (event.type === "stderr") transcript.stderr += event.chunk;
     if (event.type === "error") transcript.errors.push({ message: event.message, code: event.code });
     if (event.type === "usage") transcript.usage = event.usage;
+    if (event.type === "status") {
+      transcript.statuses.push({ label: event.label, detail: event.detail });
+    }
+    if (event.type === "diagnostic") {
+      const name = event.name ?? "diagnostic";
+      const message = typeof event.message === "string" ? event.message : "";
+      transcript.diagnostics.push({ name, message });
+    }
   }
 
   return transcript;

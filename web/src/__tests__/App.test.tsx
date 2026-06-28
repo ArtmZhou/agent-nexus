@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import App from "../App.js";
 
@@ -33,6 +33,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -162,6 +163,90 @@ describe("App", () => {
 
     FakeEventSource.instances[0]?.emit("end", { type: "end", status: "canceled" });
     expect(FakeEventSource.instances[0]?.close).toHaveBeenCalled();
+  });
+
+  test("surfaces an inline error and a terminal placeholder when the agent fails without text output", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          agents: [
+            {
+              id: "codex",
+              name: "Codex",
+              available: true,
+              path: "C:/Tools/codex.exe",
+              version: "1.2.3",
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs" && init?.method === "POST") {
+        return jsonResponse({
+          id: "run-2",
+          agentId: "codex",
+          status: "running",
+          createdAt: 100,
+          updatedAt: 100,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: null,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null
+        });
+      }
+
+      if (url === "/api/runs/run-2") {
+        return jsonResponse({
+          id: "run-2",
+          agentId: "codex",
+          status: "failed",
+          createdAt: 100,
+          updatedAt: 200,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: null,
+          signal: null,
+          error: "Codex executable could not be resolved",
+          errorCode: "agent.executable_not_found",
+          eventsLogPath: null
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Agent Nexus" });
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Make it work" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    FakeEventSource.instances[0]?.emit("error", {
+      type: "error",
+      message: "Codex executable could not be resolved",
+      code: "agent.executable_not_found"
+    });
+    FakeEventSource.instances[0]?.emit("end", { type: "end", status: "failed" });
+
+    const stream = screen.getByRole("log", { name: "Messages" });
+    expect(await within(stream).findByText("Codex executable could not be resolved")).toBeInTheDocument();
+    expect(within(stream).getByText("agent.executable_not_found")).toBeInTheDocument();
+    expect(within(stream).queryByText("Waiting for streamed output.")).not.toBeInTheDocument();
   });
 });
 

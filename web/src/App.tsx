@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
-import { cancelRun, createRun, fetchAgents, subscribeRunEvents, type RunEventSubscription } from "./api.js";
+import { cancelRun, createRun, fetchAgents, fetchRun, subscribeRunEvents, type RunEventSubscription } from "./api.js";
 import { RunConsole, type ConsoleState } from "./components/RunConsole.js";
 
 const initialConsoleState: ConsoleState = {
@@ -77,14 +77,17 @@ export default function App() {
 
   async function startRun(): Promise<void> {
     if (!selectedAgentId) return;
+    const prompt = consoleState.prompt;
+    if (!prompt.trim()) return;
+
     setError(null);
     subscriptionRef.current?.close();
     setEvents([]);
     setRawEvents([]);
-    setSubmittedPrompt("");
+    setSubmittedPrompt(prompt);
+    setConsoleState((previous) => ({ ...previous, prompt: "" }));
 
     try {
-      const prompt = consoleState.prompt;
       const run = await createRun({
         agentId: selectedAgentId,
         model: selectedModel || null,
@@ -97,7 +100,6 @@ export default function App() {
           .filter(Boolean)
       });
 
-      setSubmittedPrompt(prompt);
       setCurrentRun(run);
       subscriptionRef.current = subscribeRunEvents(
         run.id,
@@ -108,6 +110,9 @@ export default function App() {
             const terminalStatus = storedEvent.data.status;
             setCurrentRun((previous) => previous ? { ...previous, status: terminalStatus, updatedAt: Date.now() } : previous);
             subscriptionRef.current?.close();
+            void fetchRun(run.id)
+              .then((latest) => setCurrentRun(latest))
+              .catch(() => undefined);
           }
         },
         () => setError("Run event stream disconnected")

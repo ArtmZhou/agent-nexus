@@ -170,6 +170,21 @@ export function createRunService(options: RunServiceOptions = {}) {
   }
 
   async function fail(id: string, failOptions: FailRunOptions): Promise<RunStatusBody> {
+    const record = runs.get(id);
+    if (record && activeStatuses.has(record.body.status)) {
+      const alreadyReported = record.events.some(
+        (event) => event.data.type === "error" && event.data.message === failOptions.message
+      );
+
+      if (!alreadyReported) {
+        await emit(id, {
+          type: "error",
+          message: failOptions.message,
+          code: failOptions.code ?? undefined
+        });
+      }
+    }
+
     return transitionTerminal(id, "failed", {
       exitCode: failOptions.exitCode ?? null,
       signal: failOptions.signal ?? null,
