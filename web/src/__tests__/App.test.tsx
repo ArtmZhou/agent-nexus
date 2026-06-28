@@ -36,7 +36,7 @@ describe("App", () => {
     vi.restoreAllMocks();
   });
 
-  test("runs an agent and renders streamed output, diagnostics, settings, and inspector data", async () => {
+  test("runs an agent from the chat workbench and keeps diagnostics in details", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
@@ -119,41 +119,46 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Local agent console" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /Codex/ })).toHaveTextContent("live");
-    expect(screen.getByRole("button", { name: /Claude/ })).toHaveTextContent("missing");
-    expect(screen.getByText("Claude is not on PATH")).toBeInTheDocument();
-    expect(screen.getByText("AGENT_NEXUS_AGENTS_CONFIG")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Agent Nexus" })).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "Chat workbench" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Run inspector" })).not.toBeInTheDocument();
+    expect(screen.queryByText("AGENT_NEXUS_AGENTS_CONFIG")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claude is not on PATH")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Build the streaming console" } });
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    const details = await screen.findByRole("complementary", { name: "Run details" });
+    expect(within(details).getByText("Claude is not on PATH")).toBeInTheDocument();
+    expect(within(details).getByText("No run selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Run details" })).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
     fireEvent.change(screen.getByLabelText("Working directory"), { target: { value: "D:/work" } });
     fireEvent.change(screen.getByLabelText("Extra allowed dirs"), { target: { value: "D:/work/shared\nD:/work/docs" } });
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Build the streaming console" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-    expect(FakeEventSource.instances[0]?.url).toBe("/api/runs/run-1/events");
-
-    FakeEventSource.instances[0]?.emit("text_delta", { type: "text_delta", delta: "Hello agent." });
+    FakeEventSource.instances[0]?.emit("text_delta", { type: "text_delta", delta: "Here is code:\n```ts\nconst ok = true;\n```" });
     FakeEventSource.instances[0]?.emit("thinking_delta", { type: "thinking_delta", delta: "Checking tools." });
     FakeEventSource.instances[0]?.emit("tool_use", { type: "tool_use", id: "tool-1", name: "shell", input: { command: "pwd" } });
+    FakeEventSource.instances[0]?.emit("tool_result", { type: "tool_result", toolUseId: "tool-1", content: "D:/work" });
     FakeEventSource.instances[0]?.emit("stderr", { type: "stderr", chunk: "warning line" });
     FakeEventSource.instances[0]?.emit("usage", { type: "usage", usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14 } });
 
-    const streamingOutput = screen.getByRole("region", { name: "Streaming output" });
-    expect(await within(streamingOutput).findByText("Hello agent.")).toBeInTheDocument();
-    expect(within(streamingOutput).getByText("Checking tools.")).toBeInTheDocument();
-    expect(within(streamingOutput).getByText(/shell/)).toBeInTheDocument();
-    expect(within(streamingOutput).getByText("warning line")).toBeInTheDocument();
-    expect(within(streamingOutput).getByText(/14 tokens/)).toBeInTheDocument();
-
-    const inspector = screen.getByRole("complementary", { name: "Run inspector" });
-    expect(within(inspector).getByText("run-1")).toBeInTheDocument();
-    expect(within(inspector).getAllByText("4242").length).toBeGreaterThan(0);
-    expect(within(inspector).getByText("D:/logs/run-1.jsonl")).toBeInTheDocument();
+    const stream = screen.getByRole("log", { name: "Messages" });
+    expect(await within(stream).findByText("Here is code:")).toBeInTheDocument();
+    expect(within(stream).getByText("const ok = true;")).toBeInTheDocument();
+    expect(within(stream).getByText("Checking tools.")).toBeInTheDocument();
+    expect(within(stream).getByText("shell")).toBeInTheDocument();
+    expect(within(stream).getByText("D:/work")).toBeInTheDocument();
+    expect(within(stream).getByText("warning line")).toBeInTheDocument();
+    expect(within(stream).getByText("14 tokens")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.getAllByText("canceled").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByText("canceled")).toBeInTheDocument());
 
     FakeEventSource.instances[0]?.emit("end", { type: "end", status: "canceled" });
     expect(FakeEventSource.instances[0]?.close).toHaveBeenCalled();
