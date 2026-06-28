@@ -86,10 +86,17 @@ function resolveConfiguredOverride(def: RuntimeAgentDef, env: Record<string, str
   return { configuredOverridePath, configuredOverrideValue, overrideEnvKey };
 }
 
+function resolveAbsoluteBin(bin: string, env: Record<string, string | undefined>, platform: NodeJS.Platform): string | null {
+  return isAbsolute(bin) && isExecutableFile(bin, env, platform) ? bin : null;
+}
+
 export function resolveOnPath(bin: string, options: ResolveOptions = {}): string | null {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const pathDirs = options.pathDirs ?? defaultPathDirs(env, platform);
+
+  const absoluteBin = resolveAbsoluteBin(bin, env, platform);
+  if (absoluteBin) return absoluteBin;
 
   for (const dir of pathDirs) {
     for (const name of candidateNames(bin, env, platform)) {

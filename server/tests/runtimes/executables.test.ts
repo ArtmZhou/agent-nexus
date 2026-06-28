@@ -43,6 +43,10 @@ describe("resolveOnPath", () => {
     expect(resolveOnPath("demo", { pathDirs: [root], platform: process.platform })).toBe(executablePath);
   });
 
+  it("accepts an absolute executable bin path without PATH lookup", () => {
+    expect(resolveOnPath(process.execPath, { pathDirs: [], platform: process.platform })).toBe(process.execPath);
+  });
+
   it("uses PATHEXT candidates when resolving Windows executables", () => {
     const root = tempDir("pathext");
     const executablePath = join(root, "demo.CMD");
