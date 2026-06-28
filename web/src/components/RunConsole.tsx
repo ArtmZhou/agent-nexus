@@ -1,4 +1,6 @@
-import type { DetectedAgent, RunEvent, RunStatusBody, TokenUsage } from "@agent-nexus/shared";
+import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
+import { MessageStream } from "./MessageStream.js";
+import { RunInspector } from "./RunInspector.js";
 
 export type ConsoleState = {
   prompt: string;
@@ -9,61 +11,54 @@ export type ConsoleState = {
 
 type RunConsoleProps = {
   agents: DetectedAgent[];
+  diagnostics: AgentDiagnostic[];
   selectedAgentId: string | null;
   selectedModel: string;
   state: ConsoleState;
   currentRun: RunStatusBody | null;
   events: RunEvent[];
+  rawEvents: StoredRunEvent[];
   running: boolean;
+  loadingAgents: boolean;
+  detailsOpen: boolean;
+  advancedOpen: boolean;
+  submittedPrompt: string;
   onAgentChange: (agentId: string) => void;
   onModelChange: (model: string) => void;
   onStateChange: (state: ConsoleState) => void;
   onRun: () => void;
   onCancel: () => void;
+  onRefresh: () => void;
+  onDetailsOpenChange: (open: boolean) => void;
+  onAdvancedOpenChange: (open: boolean) => void;
 };
 
-export function RunConsole({
-  agents,
-  selectedAgentId,
-  selectedModel,
-  state,
-  currentRun,
-  events,
-  running,
-  onAgentChange,
-  onModelChange,
-  onStateChange,
-  onRun,
-  onCancel
-}: RunConsoleProps) {
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
-  const sections = collectSections(events);
+export function RunConsole(props: RunConsoleProps) {
+  const selectedAgent = props.agents.find((agent) => agent.id === props.selectedAgentId) ?? props.agents[0] ?? null;
 
   return (
-    <main className="run-console">
-      <header className="console-head">
+    <main className="chat-workbench" aria-label="Chat workbench">
+      <header className="top-bar">
         <div>
-          <p className="eyebrow">Local process bridge</p>
-          <h1>Local agent console</h1>
+          <p className="eyebrow">Local agent</p>
+          <h1>Agent Nexus</h1>
         </div>
-        <div className={`run-state ${currentRun?.status ?? "idle"}`}>{currentRun?.status ?? "idle"}</div>
-      </header>
 
-      <section className="prompt-surface" aria-label="Run controls">
-        <div className="control-grid">
+        <div className="top-controls">
           <label>
             Agent
-            <select value={selectedAgentId ?? ""} onChange={(event) => onAgentChange(event.target.value)}>
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
+            <select value={props.selectedAgentId ?? ""} onChange={(event) => props.onAgentChange(event.target.value)}>
+              {props.agents.map((agent) => (
+                <option key={agent.id} value={agent.id} disabled={!agent.available}>
                   {agent.name}
                 </option>
               ))}
             </select>
           </label>
+
           <label>
             Model
-            <select value={selectedModel} onChange={(event) => onModelChange(event.target.value)}>
+            <select value={props.selectedModel} onChange={(event) => props.onModelChange(event.target.value)}>
               {(selectedAgent?.models ?? []).map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.label}
@@ -71,91 +66,93 @@ export function RunConsole({
               ))}
             </select>
           </label>
+
+          <span className={`run-state ${props.currentRun?.status ?? "idle"}`}>{props.currentRun?.status ?? "idle"}</span>
+
+          <button type="button" className="ghost-button" onClick={props.onRefresh} disabled={props.loadingAgents}>
+            {props.loadingAgents ? "Scanning" : "Refresh"}
+          </button>
+
+          <button type="button" className="ghost-button" onClick={() => props.onAdvancedOpenChange(!props.advancedOpen)}>
+            Advanced
+          </button>
+
+          <button type="button" className="ghost-button" onClick={() => props.onDetailsOpenChange(true)}>
+            Details
+          </button>
+        </div>
+      </header>
+
+      {props.advancedOpen && (
+        <section className="advanced-panel" aria-label="Advanced run options">
           <label>
             Reasoning
-            <input value={state.reasoning} onChange={(event) => onStateChange({ ...state, reasoning: event.target.value })} placeholder="default" />
+            <input
+              value={props.state.reasoning}
+              onChange={(event) => props.onStateChange({ ...props.state, reasoning: event.target.value })}
+              aria-label="Reasoning"
+            />
           </label>
+
           <label>
             Working directory
-            <input value={state.cwd} onChange={(event) => onStateChange({ ...state, cwd: event.target.value })} placeholder="optional cwd" />
+            <input
+              value={props.state.cwd}
+              onChange={(event) => props.onStateChange({ ...props.state, cwd: event.target.value })}
+              aria-label="Working directory"
+            />
           </label>
-          <label className="span-two">
+
+          <label>
             Extra allowed dirs
             <textarea
-              value={state.extraAllowedDirs}
-              onChange={(event) => onStateChange({ ...state, extraAllowedDirs: event.target.value })}
-              placeholder="One directory per line"
+              value={props.state.extraAllowedDirs}
+              onChange={(event) => props.onStateChange({ ...props.state, extraAllowedDirs: event.target.value })}
+              aria-label="Extra allowed dirs"
               rows={3}
             />
           </label>
-          <label className="span-two">
-            Prompt
-            <textarea
-              value={state.prompt}
-              onChange={(event) => onStateChange({ ...state, prompt: event.target.value })}
-              placeholder="Ask the selected local agent to do something..."
-              rows={5}
-            />
-          </label>
-        </div>
+        </section>
+      )}
+
+      <MessageStream currentRun={props.currentRun} events={props.events} prompt={props.submittedPrompt} />
+
+      <section className="composer" aria-label="Prompt composer">
+        <label>
+          Prompt
+          <textarea
+            value={props.state.prompt}
+            onChange={(event) => props.onStateChange({ ...props.state, prompt: event.target.value })}
+            aria-label="Prompt"
+            rows={4}
+          />
+        </label>
 
         <div className="run-actions">
-          <button className="primary-button" type="button" onClick={onRun} disabled={running || !state.prompt.trim() || !selectedAgentId}>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={props.onRun}
+            disabled={props.running || !props.state.prompt.trim() || !props.selectedAgentId}
+          >
             Run
           </button>
-          <button className="danger-button" type="button" onClick={onCancel} disabled={!currentRun || !running}>
+
+          <button className="danger-button" type="button" onClick={props.onCancel} disabled={!props.currentRun || !props.running}>
             Cancel
           </button>
         </div>
       </section>
 
-      <section className="stream-grid" aria-label="Streaming output">
-        <OutputPane title="Text" value={sections.text || "Waiting for assistant output."} tone="text" />
-        <OutputPane title="Thinking" value={sections.thinking || "No reasoning stream yet."} tone="thinking" />
-        <OutputPane title="Tools" value={sections.tools.length === 0 ? "No tool calls." : sections.tools.join("\n\n")} tone="tools" />
-        <OutputPane title="Stderr" value={sections.stderr || "No stderr."} tone="stderr" />
-        <OutputPane title="Errors" value={sections.errors.length === 0 ? "No errors." : sections.errors.join("\n")} tone="errors" />
-        <OutputPane title="Usage" value={formatUsage(sections.usage)} tone="usage" />
-      </section>
+      {props.detailsOpen && (
+        <RunInspector
+          run={props.currentRun}
+          rawEvents={props.rawEvents}
+          agents={props.agents}
+          diagnostics={props.diagnostics}
+          onClose={() => props.onDetailsOpenChange(false)}
+        />
+      )}
     </main>
   );
-}
-
-function OutputPane({ title, value, tone }: { title: string; value: string; tone: string }) {
-  return (
-    <article className={`output-pane ${tone}`}>
-      <h3>{title}</h3>
-      <pre>{value}</pre>
-    </article>
-  );
-}
-
-function collectSections(events: RunEvent[]) {
-  const sections = {
-    text: "",
-    thinking: "",
-    tools: [] as string[],
-    stderr: "",
-    errors: [] as string[],
-    usage: null as TokenUsage | null
-  };
-
-  for (const event of events) {
-    if (event.type === "text_delta") sections.text += event.delta;
-    if (event.type === "thinking_delta") sections.thinking += event.delta;
-    if (event.type === "tool_use") sections.tools.push(`${event.name} ${JSON.stringify(event.input ?? {}, null, 2)}`);
-    if (event.type === "tool_result") sections.tools.push(`result:${event.toolUseId} ${event.content ?? ""}`);
-    if (event.type === "stderr") sections.stderr += event.chunk;
-    if (event.type === "error") sections.errors.push(event.message);
-    if (event.type === "usage") sections.usage = event.usage;
-  }
-
-  return sections;
-}
-
-function formatUsage(usage: TokenUsage | null): string {
-  if (!usage) return "No usage reported.";
-  const entries = Object.entries(usage).filter(([, value]) => typeof value === "number");
-  const total = typeof usage.total_tokens === "number" ? `${usage.total_tokens} tokens` : null;
-  return [total, ...entries.map(([key, value]) => `${key}: ${value}`)].filter(Boolean).join("\n");
 }

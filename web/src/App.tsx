@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
 import { cancelRun, createRun, fetchAgents, subscribeRunEvents, type RunEventSubscription } from "./api.js";
-import { AgentList } from "./components/AgentList.js";
 import { RunConsole, type ConsoleState } from "./components/RunConsole.js";
-import { RunInspector } from "./components/RunInspector.js";
-import { SettingsPanel } from "./components/SettingsPanel.js";
 
 const initialConsoleState: ConsoleState = {
   prompt: "",
@@ -24,6 +21,9 @@ export default function App() {
   const [rawEvents, setRawEvents] = useState<StoredRunEvent[]>([]);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [submittedPrompt, setSubmittedPrompt] = useState("");
   const subscriptionRef = useRef<RunEventSubscription | null>(null);
 
   const selectedAgent = useMemo(
@@ -81,20 +81,23 @@ export default function App() {
     subscriptionRef.current?.close();
     setEvents([]);
     setRawEvents([]);
+    setSubmittedPrompt("");
 
     try {
+      const prompt = consoleState.prompt;
       const run = await createRun({
         agentId: selectedAgentId,
         model: selectedModel || null,
         reasoning: consoleState.reasoning.trim() || null,
         cwd: consoleState.cwd.trim() || null,
-        prompt: consoleState.prompt,
+        prompt,
         extraAllowedDirs: consoleState.extraAllowedDirs
           .split(/\r?\n/u)
           .map((line) => line.trim())
           .filter(Boolean)
       });
 
+      setSubmittedPrompt(prompt);
       setCurrentRun(run);
       subscriptionRef.current = subscribeRunEvents(
         run.id,
@@ -127,39 +130,35 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <AgentList
+      {error && (
+        <div className="app-error" role="alert">
+          {error}
+        </div>
+      )}
+
+      <RunConsole
         agents={agents}
         diagnostics={diagnostics}
         selectedAgentId={selectedAgentId}
-        loading={loadingAgents}
+        selectedModel={selectedModel}
+        state={consoleState}
+        currentRun={currentRun}
+        events={events}
+        rawEvents={rawEvents}
+        running={running}
+        loadingAgents={loadingAgents}
+        detailsOpen={detailsOpen}
+        advancedOpen={advancedOpen}
+        submittedPrompt={submittedPrompt}
+        onAgentChange={selectAgent}
+        onModelChange={setSelectedModel}
+        onStateChange={setConsoleState}
+        onRun={startRun}
+        onCancel={stopRun}
         onRefresh={refreshAgents}
-        onSelect={selectAgent}
+        onDetailsOpenChange={setDetailsOpen}
+        onAdvancedOpenChange={setAdvancedOpen}
       />
-
-      <div className="workbench">
-        {error && (
-          <div className="app-error" role="alert">
-            {error}
-          </div>
-        )}
-        <RunConsole
-          agents={agents}
-          selectedAgentId={selectedAgentId}
-          selectedModel={selectedModel}
-          state={consoleState}
-          currentRun={currentRun}
-          events={events}
-          running={running}
-          onAgentChange={selectAgent}
-          onModelChange={setSelectedModel}
-          onStateChange={setConsoleState}
-          onRun={startRun}
-          onCancel={stopRun}
-        />
-        <SettingsPanel selectedAgentId={selectedAgentId} />
-      </div>
-
-      <RunInspector run={currentRun} rawEvents={rawEvents} />
     </div>
   );
 }
