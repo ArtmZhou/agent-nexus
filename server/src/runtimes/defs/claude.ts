@@ -1,0 +1,30 @@
+import { modelOption, parseLineModels } from "../models.js";
+import type { RuntimeAgentDef } from "../types.js";
+
+export const claudeDef: RuntimeAgentDef = {
+  id: "claude",
+  name: "Claude Code",
+  bin: "claude",
+  versionArgs: ["--version"],
+  fallbackModels: [
+    modelOption("sonnet", "Sonnet"),
+    modelOption("opus", "Opus"),
+    modelOption("haiku", "Haiku"),
+  ],
+  listModels: {
+    args: ["models"],
+    parse: parseLineModels,
+  },
+  buildArgs: (context) => {
+    const args = ["--print", "--output-format", "stream-json"];
+    if (context.options?.model) args.push("--model", context.options.model);
+    if (context.resumeSessionId) args.push("--resume", context.resumeSessionId);
+    return args;
+  },
+  promptViaStdin: true,
+  promptInputFormat: "stream-json",
+  streamFormat: "claude-stream-json",
+  eventParser: "claude",
+  supportsImagePaths: true,
+  resumesSessionViaCli: true,
+};

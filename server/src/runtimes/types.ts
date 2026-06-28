@@ -32,6 +32,7 @@ export type RuntimeAgentDef = {
   name: string;
   bin: string;
   fallbackBins?: string[];
+  configuredEnv?: Record<string, string>;
   versionArgs: string[];
   fallbackModels: RuntimeModelOption[];
   listModels?: RuntimeListModels;
