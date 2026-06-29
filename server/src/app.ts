@@ -35,7 +35,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.json({ ok: true });
   });
 
-  app.use("/api/agents", createAgentsRouter({ registry, detectAgents }));
+  app.use("/api/agents", createAgentsRouter({ registry, detectAgents, agentsConfigPath: paths.agentsConfigPath }));
   app.use("/api/runs", createRunsRouter({ registry, runs, startRun, activeHandles }));
   app.use(errorHandler);
 

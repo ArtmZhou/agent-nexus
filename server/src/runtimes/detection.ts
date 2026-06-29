@@ -45,6 +45,7 @@ async function detectLocalAgent(
       available: false,
       version: null,
       models: def.fallbackModels,
+      reasoningOptions: def.reasoningOptions,
       modelsSource: "fallback",
       authStatus: "unknown",
       diagnostics,
@@ -63,6 +64,7 @@ async function detectLocalAgent(
     path: executablePath,
     version,
     models,
+    reasoningOptions: def.reasoningOptions,
     modelsSource,
     authStatus: auth.status,
     authMessage: auth.message,
@@ -202,6 +204,7 @@ function detectionFailureAgent(def: RuntimeAgentDef, cause: unknown): DetectedAg
     available: false,
     version: null,
     models: def.fallbackModels,
+    reasoningOptions: def.reasoningOptions,
     modelsSource: "fallback",
     authStatus: "unknown",
     diagnostics: [

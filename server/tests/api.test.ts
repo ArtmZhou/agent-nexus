@@ -14,6 +14,7 @@ const fakeDef: RuntimeAgentDef = {
   bin: "fake-agent",
   versionArgs: ["--version"],
   fallbackModels: [{ id: "fake-model", label: "Fake Model" }],
+  reasoningOptions: [{ id: "high", label: "High" }],
   streamFormat: "plain",
   buildArgs: () => []
 };
@@ -25,6 +26,7 @@ const detectedFake: DetectedAgent = {
   path: "/bin/fake",
   version: "1.0.0",
   models: [{ id: "fake-model", label: "Fake Model" }],
+  reasoningOptions: [{ id: "high", label: "High" }],
   modelsSource: "fallback",
   authStatus: "unknown",
   diagnostics: []
@@ -41,6 +43,12 @@ afterEach(async () => {
 describe("local agent HTTP API", () => {
   test("GET /api/agents detects local agents with registry diagnostics", async () => {
     const app = createApp({
+      paths: {
+        homeDir: "D:/home",
+        dataDir: "D:/agent-nexus",
+        agentsConfigPath: "D:/agent-nexus/agents.local.json",
+        runsLogDir: "D:/agent-nexus/runs"
+      },
       registry: fakeRegistry(),
       runs: createRunService(),
       detectAgents: async () => [detectedFake]
@@ -51,7 +59,11 @@ describe("local agent HTTP API", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       agents: [detectedFake],
-      diagnostics: []
+      diagnostics: [],
+      config: {
+        agentsConfigPath: "D:/agent-nexus/agents.local.json",
+        agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+      }
     });
   });
 

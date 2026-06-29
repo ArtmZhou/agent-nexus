@@ -17,6 +17,7 @@ export type DetectedAgent = {
   path?: string;
   version?: string | null;
   models: RuntimeModelOption[];
+  reasoningOptions?: RuntimeModelOption[];
   modelsSource: "live" | "fallback";
   authStatus?: "ok" | "missing" | "unknown";
   authMessage?: string;

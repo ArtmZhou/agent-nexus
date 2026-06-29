@@ -82,6 +82,11 @@ describe("listRegisteredAgents", () => {
       id: "codex",
       available: true,
       path: codexPath,
+      reasoningOptions: [
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High" },
+      ],
       modelsSource: "fallback",
     });
     expect(codex?.models.length).toBeGreaterThan(0);

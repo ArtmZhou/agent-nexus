@@ -89,6 +89,7 @@ export function listRegisteredAgents(registry: AgentRegistry, options: ResolveOp
       path: resolution.selectedPath ?? undefined,
       version: null,
       models: def.fallbackModels,
+      reasoningOptions: def.reasoningOptions,
       modelsSource: "fallback",
       authStatus: "unknown",
       diagnostics,
