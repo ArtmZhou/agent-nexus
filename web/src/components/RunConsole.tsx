@@ -1,4 +1,5 @@
 import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
+import type { AgentsConfig } from "../api.js";
 import { MessageStream } from "./MessageStream.js";
 import { RunInspector } from "./RunInspector.js";
 
@@ -12,6 +13,7 @@ export type ConsoleState = {
 type RunConsoleProps = {
   agents: DetectedAgent[];
   diagnostics: AgentDiagnostic[];
+  agentsConfig: AgentsConfig;
   selectedAgentId: string | null;
   selectedModel: string;
   state: ConsoleState;
@@ -35,6 +37,8 @@ type RunConsoleProps = {
 
 export function RunConsole(props: RunConsoleProps) {
   const selectedAgent = props.agents.find((agent) => agent.id === props.selectedAgentId) ?? props.agents[0] ?? null;
+  const reasoningOptions = selectedAgent?.reasoningOptions ?? [];
+  const selectedReasoningValid = reasoningOptions.some((option) => option.id === props.state.reasoning);
 
   return (
     <main className="chat-workbench" aria-label="Chat workbench">
@@ -85,14 +89,23 @@ export function RunConsole(props: RunConsoleProps) {
 
       {props.advancedOpen && (
         <section className="advanced-panel" aria-label="Advanced run options">
-          <label>
-            Reasoning
-            <input
-              value={props.state.reasoning}
-              onChange={(event) => props.onStateChange({ ...props.state, reasoning: event.target.value })}
-              aria-label="Reasoning"
-            />
-          </label>
+          {reasoningOptions.length > 0 && (
+            <label>
+              Reasoning
+              <select
+                value={selectedReasoningValid ? props.state.reasoning : ""}
+                onChange={(event) => props.onStateChange({ ...props.state, reasoning: event.target.value })}
+                aria-label="Reasoning"
+              >
+                <option value="">Default</option>
+                {reasoningOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <label>
             Working directory
@@ -150,6 +163,7 @@ export function RunConsole(props: RunConsoleProps) {
           rawEvents={props.rawEvents}
           agents={props.agents}
           diagnostics={props.diagnostics}
+          agentsConfig={props.agentsConfig}
           onClose={() => props.onDetailsOpenChange(false)}
         />
       )}

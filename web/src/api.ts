@@ -1,8 +1,14 @@
 import type { AgentDiagnostic, CreateRunRequest, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
 
+export type AgentsConfig = {
+  agentsConfigPath: string;
+  agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG";
+};
+
 export type AgentsResponse = {
   agents: DetectedAgent[];
   diagnostics: AgentDiagnostic[];
+  config: AgentsConfig;
 };
 
 export type RunEventSubscription = {

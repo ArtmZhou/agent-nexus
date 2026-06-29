@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
-import { cancelRun, createRun, fetchAgents, fetchRun, subscribeRunEvents, type RunEventSubscription } from "./api.js";
+import { cancelRun, createRun, fetchAgents, fetchRun, subscribeRunEvents, type AgentsConfig, type RunEventSubscription } from "./api.js";
 import { RunConsole, type ConsoleState } from "./components/RunConsole.js";
 
 const initialConsoleState: ConsoleState = {
@@ -10,9 +10,15 @@ const initialConsoleState: ConsoleState = {
   extraAllowedDirs: ""
 };
 
+const fallbackAgentsConfig: AgentsConfig = {
+  agentsConfigPath: "",
+  agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+};
+
 export default function App() {
   const [agents, setAgents] = useState<DetectedAgent[]>([]);
   const [diagnostics, setDiagnostics] = useState<AgentDiagnostic[]>([]);
+  const [agentsConfig, setAgentsConfig] = useState<AgentsConfig>(fallbackAgentsConfig);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState("");
   const [consoleState, setConsoleState] = useState<ConsoleState>(initialConsoleState);
@@ -49,7 +55,11 @@ export default function App() {
     if (!nextAgent.models.some((model) => model.id === selectedModel)) {
       setSelectedModel(nextAgent.models[0]?.id ?? "");
     }
-  }, [agents, selectedAgent, selectedAgentId, selectedModel]);
+
+    if (consoleState.reasoning && !agentSupportsReasoning(nextAgent, consoleState.reasoning)) {
+      setConsoleState((previous) => previous.reasoning ? { ...previous, reasoning: "" } : previous);
+    }
+  }, [agents, consoleState.reasoning, selectedAgent, selectedAgentId, selectedModel]);
 
   async function refreshAgents(): Promise<void> {
     setLoadingAgents(true);
@@ -58,6 +68,7 @@ export default function App() {
       const response = await fetchAgents();
       setAgents(response.agents);
       setDiagnostics(response.diagnostics);
+      setAgentsConfig(response.config);
       if (!selectedAgentId && response.agents[0]) {
         setSelectedAgentId(response.agents[0].id);
         setSelectedModel(response.agents[0].models[0]?.id ?? "");
@@ -73,6 +84,11 @@ export default function App() {
     const agent = agents.find((candidate) => candidate.id === agentId);
     setSelectedAgentId(agentId);
     setSelectedModel(agent?.models[0]?.id ?? "");
+    setConsoleState((previous) =>
+      previous.reasoning && (!agent || !agentSupportsReasoning(agent, previous.reasoning))
+        ? { ...previous, reasoning: "" }
+        : previous
+    );
   }
 
   async function startRun(): Promise<void> {
@@ -88,10 +104,13 @@ export default function App() {
     setConsoleState((previous) => ({ ...previous, prompt: "" }));
 
     try {
+      const reasoning = selectedAgent && agentSupportsReasoning(selectedAgent, consoleState.reasoning)
+        ? consoleState.reasoning
+        : "";
       const run = await createRun({
         agentId: selectedAgentId,
         model: selectedModel || null,
-        reasoning: consoleState.reasoning.trim() || null,
+        reasoning: reasoning.trim() || null,
         cwd: consoleState.cwd.trim() || null,
         prompt,
         extraAllowedDirs: consoleState.extraAllowedDirs
@@ -144,6 +163,7 @@ export default function App() {
       <RunConsole
         agents={agents}
         diagnostics={diagnostics}
+        agentsConfig={agentsConfig}
         selectedAgentId={selectedAgentId}
         selectedModel={selectedModel}
         state={consoleState}
@@ -166,4 +186,8 @@ export default function App() {
       />
     </div>
   );
+}
+
+function agentSupportsReasoning(agent: DetectedAgent, reasoning: string): boolean {
+  return (agent.reasoningOptions ?? []).some((option) => option.id === reasoning);
 }

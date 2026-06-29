@@ -44,6 +44,10 @@ describe("App", () => {
       if (url === "/api/agents") {
         return jsonResponse({
           diagnostics: [{ code: "profile.loaded", severity: "info", message: "Local profile loaded" }],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
           agents: [
             {
               id: "codex",
@@ -52,6 +56,11 @@ describe("App", () => {
               path: "C:/Tools/codex.exe",
               version: "1.2.3",
               models: [{ id: "gpt-5", label: "GPT-5" }],
+              reasoningOptions: [
+                { id: "low", label: "Low" },
+                { id: "medium", label: "Medium" },
+                { id: "high", label: "High" }
+              ],
               modelsSource: "live",
               authStatus: "ok",
               diagnostics: []
@@ -130,10 +139,15 @@ describe("App", () => {
     const details = await screen.findByRole("complementary", { name: "Run details" });
     expect(within(details).getByText("Claude is not on PATH")).toBeInTheDocument();
     expect(within(details).getByText("No run selected")).toBeInTheDocument();
+    expect(within(details).getByText("Agent config")).toBeInTheDocument();
+    expect(within(details).getByText("D:/agent-nexus/agents.local.json")).toBeInTheDocument();
+    expect(within(details).getByText("AGENT_NEXUS_AGENTS_CONFIG")).toBeInTheDocument();
+    expect(within(details).getByText(/work-codex/u)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close details" }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Run details" })).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByRole("combobox", { name: "Reasoning" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
     fireEvent.change(screen.getByLabelText("Working directory"), { target: { value: "D:/work" } });
     fireEvent.change(screen.getByLabelText("Extra allowed dirs"), { target: { value: "D:/work/shared\nD:/work/docs" } });
@@ -172,6 +186,10 @@ describe("App", () => {
       if (url === "/api/agents") {
         return jsonResponse({
           diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
           agents: [
             {
               id: "codex",
@@ -247,6 +265,89 @@ describe("App", () => {
     expect(await within(stream).findByText("Codex executable could not be resolved")).toBeInTheDocument();
     expect(within(stream).getByText("agent.executable_not_found")).toBeInTheDocument();
     expect(within(stream).queryByText("Waiting for streamed output.")).not.toBeInTheDocument();
+  });
+
+  test("only sends reasoning for agents that advertise reasoning options", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "codex",
+              name: "Codex",
+              available: true,
+              path: "C:/Tools/codex.exe",
+              version: "1.2.3",
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              reasoningOptions: [{ id: "high", label: "High" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            },
+            {
+              id: "claude",
+              name: "Claude",
+              available: true,
+              path: "C:/Tools/claude.exe",
+              version: "2.0.0",
+              models: [{ id: "sonnet", label: "Sonnet" }],
+              modelsSource: "fallback",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          agentId: "claude",
+          model: "sonnet",
+          reasoning: null,
+          prompt: "Run without Codex reasoning"
+        });
+
+        return jsonResponse({
+          id: "run-3",
+          agentId: "claude",
+          status: "running",
+          createdAt: 100,
+          updatedAt: 100,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: null,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Agent Nexus" });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "claude" } });
+
+    await waitFor(() => expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Run without Codex reasoning" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
   });
 });
 

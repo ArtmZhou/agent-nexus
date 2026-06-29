@@ -445,6 +445,14 @@ button:focus-visible {
   max-height: 420px;
 }
 
+.agent-config-section .kv-list {
+  margin-top: 0;
+}
+
+.agent-config-section .muted {
+  line-height: 1.45;
+}
+
 .kv-list {
   display: grid;
   grid-template-columns: 116px minmax(0, 1fr);
