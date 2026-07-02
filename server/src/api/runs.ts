@@ -26,7 +26,9 @@ export function createRunsRouter(services: RunsRouterServices): Router {
     }
 
     response.json({
-      runs: status === "active" ? services.runs.list({ active: true }) : services.runs.list(status ? { status } : {})
+      runs: status === "active"
+        ? services.runs.listSummaries({ active: true })
+        : services.runs.listSummaries(status ? { status } : {})
     });
   });
 

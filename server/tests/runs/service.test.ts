@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "vitest";
@@ -191,5 +191,59 @@ describe("createRunService", () => {
       errorCode: "shutdown"
     });
     expect(service.list({ active: true })).toEqual([]);
+  });
+
+  test("persists run summaries and restores them in a new service instance", async () => {
+    const runsLogDir = await tempDir();
+    let now = 100;
+    const firstService = createRunService({
+      idGenerator: () => "run_persisted",
+      now: () => now,
+      runsLogDir
+    });
+
+    const created = firstService.create(request({
+      prompt: "remember this run",
+      model: "gpt-5",
+      reasoning: "high",
+      cwd: "D:/work",
+      extraAllowedDirs: ["D:/shared"]
+    }));
+    now = 110;
+    firstService.start(created.id, { childPid: 123, processGroupId: 123 });
+    now = 120;
+    await firstService.finish(created.id, { exitCode: 0 });
+
+    const restoredService = createRunService({
+      now: () => 200,
+      runsLogDir
+    });
+
+    expect(restoredService.listSummaries()).toEqual([
+      expect.objectContaining({
+        id: "run_persisted",
+        agentId: "codex",
+        status: "succeeded",
+        prompt: "remember this run",
+        model: "gpt-5",
+        reasoning: "high",
+        cwd: "D:/work",
+        extraAllowedDirs: ["D:/shared"],
+        childPid: 123,
+        processGroupId: 123,
+        exitCode: 0,
+        eventsLogPath: join(runsLogDir, "run_persisted.jsonl")
+      })
+    ]);
+  });
+
+  test("ignores malformed run index files instead of crashing", async () => {
+    const runsLogDir = await tempDir();
+    await mkdir(runsLogDir, { recursive: true });
+    await writeFile(join(runsLogDir, "index.json"), "{not-json", "utf8");
+
+    const service = createRunService({ runsLogDir });
+
+    expect(service.listSummaries()).toEqual([]);
   });
 });

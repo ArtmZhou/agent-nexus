@@ -71,6 +71,18 @@ export type RunStatusBody = {
   eventsLogPath: string | null;
 };
 
+export type RunSummary = RunStatusBody & {
+  prompt: string;
+  model?: string | null;
+  reasoning?: string | null;
+  cwd?: string | null;
+  extraAllowedDirs?: string[];
+};
+
+export type RunListResponse = {
+  runs: RunSummary[];
+};
+
 export type CreateRunRequest = {
   agentId: string;
   model?: string | null;

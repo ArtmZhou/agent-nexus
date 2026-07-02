@@ -129,6 +129,38 @@ describe("local agent HTTP API", () => {
     expect(body).toContain('"status":"succeeded"');
   });
 
+  test("GET /api/runs returns persistent run summaries", async () => {
+    const runs = createRunService({ idGenerator: () => "run_list", now: incrementingClock() });
+    const run = runs.create({
+      agentId: "fake",
+      prompt: "show in history",
+      model: "fake-model",
+      cwd: "D:/work"
+    });
+    await runs.finish(run.id);
+    const app = createApp({
+      registry: fakeRegistry(),
+      runs,
+      detectAgents: async () => [detectedFake]
+    });
+
+    const response = await fetch(`${await listen(app)}/api/runs`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      runs: [
+        expect.objectContaining({
+          id: "run_list",
+          agentId: "fake",
+          prompt: "show in history",
+          model: "fake-model",
+          cwd: "D:/work",
+          status: "succeeded"
+        })
+      ]
+    });
+  });
+
   test("POST /api/runs/:id/cancel calls the active launcher handle", async () => {
     const runs = createRunService({ idGenerator: () => "run_cancel" });
     let createdBody: RunStatusBody | null = null;

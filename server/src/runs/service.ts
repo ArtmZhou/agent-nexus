@@ -5,8 +5,10 @@ import type {
   RunEvent,
   RunStatus,
   RunStatusBody,
+  RunSummary,
   StoredRunEvent
 } from "@agent-nexus/shared";
+import { readRunIndexSync, writeRunIndex } from "./persistence.js";
 
 export type RunServiceOptions = {
   runsLogDir?: string;
@@ -60,6 +62,10 @@ export function createRunService(options: RunServiceOptions = {}) {
   const now = options.now ?? Date.now;
   const idGenerator = options.idGenerator ?? createDefaultIdGenerator();
   const runs = new Map<string, RunRecord>();
+  const summaries = new Map<string, RunSummary>(
+    (options.runsLogDir ? readRunIndexSync(options.runsLogDir) : []).map((summary) => [summary.id, cloneSummary(summary)])
+  );
+  let summaryWriteQueue: Promise<void> = Promise.resolve();
 
   function create(request: CreateRunRequest): RunStatusBody {
     const id = idGenerator();
@@ -89,6 +95,7 @@ export function createRunService(options: RunServiceOptions = {}) {
       listeners: new Set(),
       waiters: new Set()
     });
+    void upsertSummary(runs.get(id)!);
 
     return cloneBody(body);
   }
@@ -114,6 +121,25 @@ export function createRunService(options: RunServiceOptions = {}) {
         return statuses ? statuses.has(record.body.status) : true;
       })
       .map((record) => cloneBody(record.body));
+  }
+
+  function listSummaries(filter: RunListFilter = {}): RunSummary[] {
+    const statuses = normalizeStatuses(filter.status);
+
+    return Array.from(summaries.values())
+      .filter((summary) => {
+        if (filter.active === true && !activeStatuses.has(summary.status)) {
+          return false;
+        }
+
+        if (filter.active === false && activeStatuses.has(summary.status)) {
+          return false;
+        }
+
+        return statuses ? statuses.has(summary.status) : true;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(cloneSummary);
   }
 
   async function emit(id: string, data: RunEvent): Promise<StoredRunEvent> {
@@ -144,7 +170,7 @@ export function createRunService(options: RunServiceOptions = {}) {
   }
 
   function statusBody(id: string): RunStatusBody | null {
-    return get(id);
+    return get(id) ?? cloneBodyFromSummary(summaries.get(id));
   }
 
   function start(id: string, startOptions: StartRunOptions = {}): RunStatusBody {
@@ -158,6 +184,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     record.body.updatedAt = now();
     record.body.childPid = startOptions.childPid ?? record.body.childPid;
     record.body.processGroupId = startOptions.processGroupId ?? record.body.processGroupId;
+    void upsertSummary(record);
     return cloneBody(record.body);
   }
 
@@ -257,6 +284,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     }
 
     await emit(id, { type: "end", status });
+    await upsertSummary(record);
     resolveWaiters(record);
     return cloneBody(record.body);
   }
@@ -280,10 +308,33 @@ export function createRunService(options: RunServiceOptions = {}) {
     await appendFile(record.body.eventsLogPath, `${JSON.stringify(event)}\n`, "utf8");
   }
 
+  async function upsertSummary(record: RunRecord): Promise<void> {
+    summaries.set(record.body.id, {
+      ...cloneBody(record.body),
+      prompt: record.request.prompt,
+      model: record.request.model ?? null,
+      reasoning: record.request.reasoning ?? null,
+      cwd: record.request.cwd ?? null,
+      extraAllowedDirs: record.request.extraAllowedDirs ? [...record.request.extraAllowedDirs] : []
+    });
+    await persistSummaries();
+  }
+
+  async function persistSummaries(): Promise<void> {
+    if (!options.runsLogDir) return;
+
+    summaryWriteQueue = summaryWriteQueue.then(
+      () => writeRunIndex(options.runsLogDir!, listSummaries()),
+      () => writeRunIndex(options.runsLogDir!, listSummaries())
+    );
+    await summaryWriteQueue;
+  }
+
   return {
     create,
     get,
     list,
+    listSummaries,
     emit,
     eventsAfter,
     statusBody,
@@ -321,6 +372,28 @@ function resolveWaiters(record: RunRecord): void {
 
 function cloneBody(body: RunStatusBody): RunStatusBody {
   return { ...body };
+}
+
+function cloneBodyFromSummary(summary: RunSummary | undefined): RunStatusBody | null {
+  if (!summary) return null;
+
+  const {
+    prompt: _prompt,
+    model: _model,
+    reasoning: _reasoning,
+    cwd: _cwd,
+    extraAllowedDirs: _extraAllowedDirs,
+    ...body
+  } = summary;
+
+  return cloneBody(body);
+}
+
+function cloneSummary(summary: RunSummary): RunSummary {
+  return {
+    ...summary,
+    extraAllowedDirs: summary.extraAllowedDirs ? [...summary.extraAllowedDirs] : []
+  };
 }
 
 function cloneEvent(event: StoredRunEvent): StoredRunEvent {
