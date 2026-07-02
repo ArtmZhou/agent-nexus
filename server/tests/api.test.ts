@@ -234,6 +234,32 @@ describe("local agent HTTP API", () => {
     expect(body).toContain("id: 3\nevent: end");
   });
 
+  test("GET /api/runs/:id/events replays restored log failures as SSE errors", async () => {
+    const runsLogDir = await tempDir();
+    const firstRuns = createRunService({
+      idGenerator: () => "run_restored_sse_missing_log",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstRuns.create({ agentId: "fake", prompt: "restore missing log" });
+    await firstRuns.emit(run.id, { type: "text_delta", delta: "will disappear" });
+    await firstRuns.finish(run.id);
+    await rm(join(runsLogDir, "run_restored_sse_missing_log.jsonl"), { force: true });
+    const restoredRuns = createRunService({ runsLogDir });
+    const app = createApp({
+      registry: fakeRegistry(),
+      runs: restoredRuns,
+      detectAgents: async () => [detectedFake]
+    });
+
+    const response = await fetch(`${await listen(app)}/api/runs/${run.id}/events`);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("event: error");
+    expect(body).toContain("run.events_replay_failed");
+  });
+
   test("POST /api/runs/:id/cancel rejects restored runs without throwing", async () => {
     const runsLogDir = await tempDir();
     const firstRuns = createRunService({
