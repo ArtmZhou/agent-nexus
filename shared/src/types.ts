@@ -12,6 +12,7 @@ export type AgentDiagnostic = {
 
 export type DetectedAgent = {
   id: string;
+  baseAgentId?: string;
   name: string;
   available: boolean;
   path?: string;

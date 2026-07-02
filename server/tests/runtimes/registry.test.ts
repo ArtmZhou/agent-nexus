@@ -97,4 +97,31 @@ describe("listRegisteredAgents", () => {
     });
     expect(claude?.diagnostics?.[0]?.code).toBe("agent.not_on_path");
   });
+
+  it("exposes base agent identity for local profile detected agents", () => {
+    const binDir = tempDir("profile-bin");
+    const codexPath = writeExecutable(binDir, "codex");
+    const registry = createAgentRegistry({
+      profiles: [
+        {
+          id: "codex-work",
+          name: "Work Codex",
+          baseAgent: "codex",
+        },
+      ],
+    });
+
+    const agents = listRegisteredAgents(registry, {
+      pathDirs: [binDir],
+      platform: process.platform,
+      env: { PATH: binDir },
+    });
+
+    expect(agents.find((agent) => agent.id === "codex-work")).toMatchObject({
+      id: "codex-work",
+      name: "Work Codex",
+      baseAgentId: "codex",
+      path: codexPath,
+    });
+  });
 });

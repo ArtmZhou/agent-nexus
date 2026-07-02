@@ -84,6 +84,7 @@ export function listRegisteredAgents(registry: AgentRegistry, options: ResolveOp
     const diagnostics = resolution.selectedPath ? [] : [agentNotOnPathDiagnostic(def, resolution)];
     return {
       id: def.id,
+      baseAgentId: def.baseAgentId,
       name: def.name,
       available: resolution.selectedPath !== null,
       path: resolution.selectedPath ?? undefined,
@@ -102,6 +103,7 @@ function extendAgentDef(base: RuntimeAgentDef, profile: LocalAgentProfile): Runt
   return {
     ...base,
     id: profile.id,
+    baseAgentId: base.baseAgentId ?? base.id,
     name: profile.name,
     bin: profile.bin ?? base.bin,
     configuredEnv: {

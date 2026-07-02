@@ -41,6 +41,7 @@ async function detectLocalAgent(
     diagnostics.push(agentNotOnPathDiagnostic(def, resolution));
     return {
       id: def.id,
+      baseAgentId: def.baseAgentId,
       name: def.name,
       available: false,
       version: null,
@@ -59,6 +60,7 @@ async function detectLocalAgent(
 
   return {
     id: def.id,
+    baseAgentId: def.baseAgentId,
     name: def.name,
     available: true,
     path: executablePath,
@@ -200,6 +202,7 @@ async function invokeProbe(
 function detectionFailureAgent(def: RuntimeAgentDef, cause: unknown): DetectedAgent {
   return {
     id: def.id,
+    baseAgentId: def.baseAgentId,
     name: def.name,
     available: false,
     version: null,

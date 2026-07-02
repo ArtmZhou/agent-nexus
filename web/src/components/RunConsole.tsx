@@ -1,5 +1,6 @@
 import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
 import type { AgentsConfig } from "../api.js";
+import { AgentPicker } from "./AgentPicker.js";
 import { MessageStream } from "./MessageStream.js";
 import { RunInspector } from "./RunInspector.js";
 
@@ -49,16 +50,12 @@ export function RunConsole(props: RunConsoleProps) {
         </div>
 
         <div className="top-controls">
-          <label>
-            Agent
-            <select value={props.selectedAgentId ?? ""} onChange={(event) => props.onAgentChange(event.target.value)}>
-              {props.agents.map((agent) => (
-                <option key={agent.id} value={agent.id} disabled={!agent.available}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <AgentPicker
+            agents={props.agents}
+            selectedAgentId={props.selectedAgentId}
+            selectedModel={props.selectedModel}
+            onSelect={props.onAgentChange}
+          />
 
           <label>
             Model

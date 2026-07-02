@@ -145,6 +145,91 @@ h3 {
   min-width: 150px;
 }
 
+.agent-picker {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 230px;
+}
+
+.control-label {
+  color: #3f4650;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.agent-picker-button,
+.agent-picker-option {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.agent-picker-button[aria-expanded="true"],
+.agent-picker-option.selected {
+  border-color: var(--blue);
+  background: var(--surface-tint);
+}
+
+.agent-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--blue);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.agent-picker-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-picker-copy strong,
+.agent-picker-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-picker-copy span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.agent-picker-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  gap: 6px;
+  width: min(320px, 80vw);
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.agent-picker-option[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .eyebrow {
   color: var(--blue);
   font-size: 11px;
@@ -640,6 +725,7 @@ button:focus-visible {
   }
 
   .top-controls label,
+  .top-controls .agent-picker,
   .top-controls button,
   .top-controls .run-state {
     min-width: min(100%, 150px);

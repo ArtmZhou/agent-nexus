@@ -67,6 +67,7 @@ describe("App", () => {
             },
             {
               id: "claude",
+              baseAgentId: "claude",
               name: "Claude",
               available: false,
               models: [{ id: "sonnet", label: "Sonnet" }],
@@ -131,6 +132,14 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "Agent Nexus" })).toBeInTheDocument();
     expect(screen.getByRole("main", { name: "Chat workbench" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Agent Codex/i })).toHaveTextContent("CX");
+    fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
+    expect(await screen.findByRole("option", { name: /Codex/i })).toHaveTextContent("CX");
+    const unavailableClaude = screen.getByRole("option", { name: /Claude/i });
+    expect(unavailableClaude).toHaveTextContent("CL");
+    expect(unavailableClaude).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(unavailableClaude);
+    expect(screen.getByRole("button", { name: /Agent Codex/i })).toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "Run inspector" })).not.toBeInTheDocument();
     expect(screen.queryByText("AGENT_NEXUS_AGENTS_CONFIG")).not.toBeInTheDocument();
     expect(screen.queryByText("Claude is not on PATH")).not.toBeInTheDocument();
@@ -340,7 +349,8 @@ describe("App", () => {
     await screen.findByRole("heading", { name: "Agent Nexus" });
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
-    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "claude" } });
+    fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /Claude/i }));
 
     await waitFor(() => expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument());
 
@@ -348,6 +358,54 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  });
+
+  test("uses stable agent icons for base identities and falls back for unknown agents", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "work-codex",
+              baseAgentId: "codex",
+              name: "Work Codex",
+              available: true,
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "fallback",
+              authStatus: "ok",
+              diagnostics: []
+            },
+            {
+              id: "custom",
+              name: "Custom Agent",
+              available: true,
+              models: [{ id: "custom-model", label: "Custom Model" }],
+              modelsSource: "fallback",
+              authStatus: "unknown",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: /Agent Work Codex/i })).toHaveTextContent("CX");
+    fireEvent.click(screen.getByRole("button", { name: /Agent Work Codex/i }));
+    expect(await screen.findByRole("option", { name: /Custom Agent/i })).toHaveTextContent("AG");
+    fireEvent.click(screen.getByRole("option", { name: /Custom Agent/i }));
+    expect(screen.getByRole("button", { name: /Agent Custom Agent/i })).toHaveTextContent("AG");
   });
 });
 

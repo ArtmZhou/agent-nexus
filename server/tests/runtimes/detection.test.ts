@@ -122,6 +122,28 @@ describe("detectLocalAgents", () => {
     expect(agent.reasoningOptions).toEqual([{ id: "high", label: "High" }]);
   });
 
+  it("includes runtime base agent identity in detected agents", async () => {
+    const scriptPath = writeProbeScript("base-agent", `
+      if (process.argv[2] === "version") console.log("profile-agent 1.0.0");
+      if (process.argv[2] === "models") console.log("profile-model");
+    `);
+    const def = {
+      ...nodeAgent("work-codex", scriptPath),
+      name: "Work Codex",
+      baseAgentId: "codex",
+    };
+
+    const [agent] = await detectLocalAgents(registry([def]), {
+      resolve: { pathDirs: [dirname(process.execPath)] },
+    });
+
+    expect(agent).toMatchObject({
+      id: "work-codex",
+      name: "Work Codex",
+      baseAgentId: "codex",
+    });
+  });
+
   it("uses fallback models and diagnostics when the live model probe fails", async () => {
     const scriptPath = writeProbeScript("models-fallback", `
       const mode = process.argv[2];
