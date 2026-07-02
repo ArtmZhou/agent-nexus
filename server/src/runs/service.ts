@@ -173,6 +173,10 @@ export function createRunService(options: RunServiceOptions = {}) {
     return get(id) ?? cloneBodyFromSummary(summaries.get(id));
   }
 
+  function hasInMemoryRun(id: string): boolean {
+    return runs.has(id);
+  }
+
   function start(id: string, startOptions: StartRunOptions = {}): RunStatusBody {
     const record = requireRun(id);
 
@@ -320,14 +324,14 @@ export function createRunService(options: RunServiceOptions = {}) {
     await persistSummaries();
   }
 
-  async function persistSummaries(): Promise<void> {
-    if (!options.runsLogDir) return;
+  function persistSummaries(): Promise<void> {
+    if (!options.runsLogDir) return Promise.resolve();
 
-    summaryWriteQueue = summaryWriteQueue.then(
-      () => writeRunIndex(options.runsLogDir!, listSummaries()),
-      () => writeRunIndex(options.runsLogDir!, listSummaries())
-    );
-    await summaryWriteQueue;
+    summaryWriteQueue = summaryWriteQueue
+      .catch(() => undefined)
+      .then(() => writeRunIndex(options.runsLogDir!, listSummaries()))
+      .catch(() => undefined);
+    return summaryWriteQueue;
   }
 
   return {
@@ -338,6 +342,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     emit,
     eventsAfter,
     statusBody,
+    hasInMemoryRun,
     start,
     finish,
     fail,

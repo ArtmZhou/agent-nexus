@@ -49,6 +49,11 @@ export function createRunsRouter(services: RunsRouterServices): Router {
       return;
     }
 
+    if (!services.runs.hasInMemoryRun(run.id)) {
+      response.status(409).json({ error: "Run event replay is not available for restored runs yet" });
+      return;
+    }
+
     const after = parseEventCursor(request.query.after, request.get("Last-Event-ID"));
     if (after === null) {
       response.status(400).json({ error: "Invalid event cursor" });
@@ -140,6 +145,11 @@ export function createRunsRouter(services: RunsRouterServices): Router {
       const run = services.runs.statusBody(request.params.id);
       if (!run) {
         response.status(404).json({ error: "Run not found" });
+        return;
+      }
+
+      if (!services.runs.hasInMemoryRun(run.id)) {
+        response.status(409).json({ error: "Restored runs cannot be canceled" });
         return;
       }
 

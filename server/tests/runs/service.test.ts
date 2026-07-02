@@ -1,13 +1,15 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { CreateRunRequest, RunEvent } from "@agent-nexus/shared";
+import * as persistence from "../../src/runs/persistence.js";
 import { createRunService } from "../../src/runs/service.js";
 
 const createdDirs: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   createdDirs.length = 0;
 });
@@ -245,5 +247,110 @@ describe("createRunService", () => {
     const service = createRunService({ runsLogDir });
 
     expect(service.listSummaries()).toEqual([]);
+  });
+
+  test("skips invalid records when restoring a mixed run index", async () => {
+    const runsLogDir = await tempDir();
+    await mkdir(runsLogDir, { recursive: true });
+    await writeFile(join(runsLogDir, "index.json"), JSON.stringify({
+      runs: [
+        {
+          id: "run_valid",
+          agentId: "codex",
+          status: "succeeded",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: join(runsLogDir, "run_valid.jsonl"),
+          prompt: "valid",
+          model: null,
+          reasoning: "high",
+          cwd: "D:/work",
+          extraAllowedDirs: ["D:/shared"]
+        },
+        {
+          id: "run_bad_status",
+          agentId: "codex",
+          status: "finished",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null,
+          prompt: "invalid status"
+        },
+        {
+          id: "run_bad_pid",
+          agentId: "codex",
+          status: "succeeded",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: "123",
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null,
+          prompt: "invalid pid"
+        },
+        {
+          id: "run_bad_dirs",
+          agentId: "codex",
+          status: "succeeded",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null,
+          prompt: "invalid dirs",
+          extraAllowedDirs: [123]
+        }
+      ]
+    }), "utf8");
+
+    const service = createRunService({ runsLogDir });
+
+    expect(service.listSummaries()).toEqual([
+      expect.objectContaining({
+        id: "run_valid",
+        status: "succeeded",
+        prompt: "valid",
+        childPid: null,
+        extraAllowedDirs: ["D:/shared"]
+      })
+    ]);
+  });
+
+  test("run lifecycle methods do not reject when run index writes fail", async () => {
+    const runsLogDir = await tempDir();
+    const service = createRunService({
+      idGenerator: () => "run_write_failure",
+      runsLogDir
+    });
+    const run = service.create(request());
+    vi.spyOn(persistence, "writeRunIndex").mockRejectedValue(new Error("index unavailable"));
+
+    await expect(service.finish(run.id)).resolves.toMatchObject({
+      id: run.id,
+      status: "succeeded"
+    });
   });
 });

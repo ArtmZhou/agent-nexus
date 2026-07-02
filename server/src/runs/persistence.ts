@@ -1,7 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { RunSummary } from "@agent-nexus/shared";
+import type { RunStatus, RunSummary } from "@agent-nexus/shared";
 
 export const RUN_INDEX_FILE = "index.json";
 
@@ -9,14 +9,7 @@ type RunIndexFile = {
   runs: RunSummary[];
 };
 
-export async function readRunIndex(runsLogDir: string): Promise<RunSummary[]> {
-  try {
-    const raw = await readFile(runIndexPath(runsLogDir), "utf8");
-    return parseRunIndex(raw);
-  } catch {
-    return [];
-  }
-}
+const runStatuses = new Set<RunStatus>(["queued", "running", "succeeded", "failed", "canceled"]);
 
 export function readRunIndexSync(runsLogDir: string): RunSummary[] {
   try {
@@ -55,9 +48,21 @@ function isRunSummary(input: unknown): input is RunSummary {
     typeof input.agentId === "string" &&
     typeof input.prompt === "string" &&
     typeof input.status === "string" &&
+    runStatuses.has(input.status as RunStatus) &&
     typeof input.createdAt === "number" &&
     typeof input.updatedAt === "number" &&
-    typeof input.cancelRequested === "boolean";
+    typeof input.cancelRequested === "boolean" &&
+    isNullableNumber(input.childPid) &&
+    isNullableNumber(input.processGroupId) &&
+    isNullableNumber(input.exitCode) &&
+    isNullableString(input.signal) &&
+    isNullableString(input.error) &&
+    isNullableString(input.errorCode) &&
+    isNullableString(input.eventsLogPath) &&
+    isOptionalNullableString(input.model) &&
+    isOptionalNullableString(input.reasoning) &&
+    isOptionalNullableString(input.cwd) &&
+    (input.extraAllowedDirs === undefined || isStringArray(input.extraAllowedDirs));
 }
 
 function cloneSummary(summary: RunSummary): RunSummary {
@@ -69,4 +74,20 @@ function cloneSummary(summary: RunSummary): RunSummary {
 
 function isObject(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function isNullableNumber(input: unknown): input is number | null {
+  return input === null || typeof input === "number";
+}
+
+function isNullableString(input: unknown): input is string | null {
+  return input === null || typeof input === "string";
+}
+
+function isOptionalNullableString(input: unknown): input is string | null | undefined {
+  return input === undefined || isNullableString(input);
+}
+
+function isStringArray(input: unknown): input is string[] {
+  return Array.isArray(input) && input.every((item) => typeof item === "string");
 }

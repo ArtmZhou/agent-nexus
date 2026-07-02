@@ -1,5 +1,8 @@
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DetectedAgent, RunStatusBody } from "@agent-nexus/shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createApp } from "../src/app.js";
@@ -33,12 +36,21 @@ const detectedFake: DetectedAgent = {
 };
 
 const servers: Server[] = [];
+const createdDirs: string[] = [];
 
 afterEach(async () => {
   await Promise.all(servers.map((server) => closeServer(server)));
   servers.length = 0;
+  await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  createdDirs.length = 0;
   vi.restoreAllMocks();
 });
+
+async function tempDir() {
+  const dir = await mkdtemp(join(tmpdir(), "agent-nexus-api-runs-"));
+  createdDirs.push(dir);
+  return dir;
+}
 
 describe("local agent HTTP API", () => {
   test("GET /api/agents detects local agents with registry diagnostics", async () => {
@@ -130,17 +142,23 @@ describe("local agent HTTP API", () => {
   });
 
   test("GET /api/runs returns persistent run summaries", async () => {
-    const runs = createRunService({ idGenerator: () => "run_list", now: incrementingClock() });
-    const run = runs.create({
+    const runsLogDir = await tempDir();
+    const firstRuns = createRunService({
+      idGenerator: () => "run_list",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstRuns.create({
       agentId: "fake",
       prompt: "show in history",
       model: "fake-model",
       cwd: "D:/work"
     });
-    await runs.finish(run.id);
+    await firstRuns.finish(run.id);
+    const restoredRuns = createRunService({ runsLogDir });
     const app = createApp({
       registry: fakeRegistry(),
-      runs,
+      runs: restoredRuns,
       detectAgents: async () => [detectedFake]
     });
 
@@ -158,6 +176,55 @@ describe("local agent HTTP API", () => {
           status: "succeeded"
         })
       ]
+    });
+  });
+
+  test("GET /api/runs/:id/events rejects restored runs until replay is implemented", async () => {
+    const runsLogDir = await tempDir();
+    const firstRuns = createRunService({
+      idGenerator: () => "run_restored_events",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstRuns.create({ agentId: "fake", prompt: "restore events later" });
+    await firstRuns.finish(run.id);
+    const restoredRuns = createRunService({ runsLogDir });
+    const app = createApp({
+      registry: fakeRegistry(),
+      runs: restoredRuns,
+      detectAgents: async () => [detectedFake]
+    });
+
+    const response = await fetch(`${await listen(app)}/api/runs/${run.id}/events`);
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      error: "Run event replay is not available for restored runs yet"
+    });
+  });
+
+  test("POST /api/runs/:id/cancel rejects restored runs without throwing", async () => {
+    const runsLogDir = await tempDir();
+    const firstRuns = createRunService({
+      idGenerator: () => "run_restored_cancel",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstRuns.create({ agentId: "fake", prompt: "cannot cancel history" });
+    await firstRuns.finish(run.id);
+    const restoredRuns = createRunService({ runsLogDir });
+    const app = createApp({
+      registry: fakeRegistry(),
+      runs: restoredRuns,
+      detectAgents: async () => [detectedFake]
+    });
+
+    const response = await fetch(`${await listen(app)}/api/runs/${run.id}/cancel`, { method: "POST" });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Restored runs cannot be canceled"
     });
   });
 
