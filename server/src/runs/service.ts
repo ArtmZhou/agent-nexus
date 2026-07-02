@@ -8,7 +8,7 @@ import type {
   RunSummary,
   StoredRunEvent
 } from "@agent-nexus/shared";
-import { readRunIndexSync, writeRunIndex } from "./persistence.js";
+import { readRunEventsFromLog, readRunIndexSync, writeRunIndex } from "./persistence.js";
 
 export type RunServiceOptions = {
   runsLogDir?: string;
@@ -167,6 +167,20 @@ export function createRunService(options: RunServiceOptions = {}) {
     return record.events
       .filter((event) => event.id > afterEventId)
       .map((event) => cloneEvent(event));
+  }
+
+  async function eventsAfterAsync(id: string, afterEventId = 0): Promise<StoredRunEvent[]> {
+    const record = runs.get(id);
+    if (record) {
+      return eventsAfter(id, afterEventId);
+    }
+
+    const summary = summaries.get(id);
+    if (!summary?.eventsLogPath) {
+      return [];
+    }
+
+    return readRunEventsFromLog(summary.eventsLogPath, afterEventId);
   }
 
   function statusBody(id: string): RunStatusBody | null {
@@ -341,6 +355,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     listSummaries,
     emit,
     eventsAfter,
+    eventsAfterAsync,
     statusBody,
     hasInMemoryRun,
     start,

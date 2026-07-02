@@ -1,7 +1,7 @@
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { RunStatus, RunSummary } from "@agent-nexus/shared";
+import type { RunStatus, RunSummary, StoredRunEvent } from "@agent-nexus/shared";
 
 export const RUN_INDEX_FILE = "index.json";
 
@@ -36,6 +36,30 @@ export function runIndexPath(runsLogDir: string): string {
   return join(runsLogDir, RUN_INDEX_FILE);
 }
 
+export async function readRunEventsFromLog(eventsLogPath: string, afterEventId = 0): Promise<StoredRunEvent[]> {
+  try {
+    const raw = await readFile(eventsLogPath, "utf8");
+    const events: StoredRunEvent[] = [];
+
+    for (const line of raw.split(/\r?\n/u)) {
+      if (!line.trim()) continue;
+
+      const parsed = JSON.parse(line) as unknown;
+      if (!isStoredRunEvent(parsed)) {
+        return [replayErrorEvent(afterEventId)];
+      }
+
+      if (parsed.id > afterEventId) {
+        events.push(parsed);
+      }
+    }
+
+    return events;
+  } catch {
+    return [replayErrorEvent(afterEventId)];
+  }
+}
+
 function parseRunIndex(raw: string): RunSummary[] {
   const parsed = JSON.parse(raw) as unknown;
   if (!isObject(parsed) || !Array.isArray(parsed.runs)) return [];
@@ -63,6 +87,30 @@ function isRunSummary(input: unknown): input is RunSummary {
     isOptionalNullableString(input.reasoning) &&
     isOptionalNullableString(input.cwd) &&
     (input.extraAllowedDirs === undefined || isStringArray(input.extraAllowedDirs));
+}
+
+function isStoredRunEvent(input: unknown): input is StoredRunEvent {
+  return isObject(input) &&
+    typeof input.id === "number" &&
+    Number.isFinite(input.id) &&
+    typeof input.event === "string" &&
+    typeof input.timestamp === "number" &&
+    Number.isFinite(input.timestamp) &&
+    isObject(input.data) &&
+    typeof input.data.type === "string";
+}
+
+function replayErrorEvent(afterEventId: number): StoredRunEvent {
+  return {
+    id: afterEventId + 1,
+    event: "error",
+    timestamp: Date.now(),
+    data: {
+      type: "error",
+      message: "Unable to replay stored run events",
+      code: "run.events_replay_failed"
+    }
+  };
 }
 
 function cloneSummary(summary: RunSummary): RunSummary {

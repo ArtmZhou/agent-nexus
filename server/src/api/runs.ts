@@ -42,15 +42,10 @@ export function createRunsRouter(services: RunsRouterServices): Router {
     }
   });
 
-  router.get("/:id/events", (request, response) => {
+  router.get("/:id/events", async (request, response) => {
     const run = services.runs.statusBody(request.params.id);
     if (!run) {
       response.status(404).json({ error: "Run not found" });
-      return;
-    }
-
-    if (!services.runs.hasInMemoryRun(run.id)) {
-      response.status(409).json({ error: "Run event replay is not available for restored runs yet" });
       return;
     }
 
@@ -69,12 +64,18 @@ export function createRunsRouter(services: RunsRouterServices): Router {
 
     let closed = false;
     const sent = new Set<number>();
-    const unsubscribe = services.runs.subscribe(run.id, send);
+    const unsubscribe = services.runs.hasInMemoryRun(run.id)
+      ? services.runs.subscribe(run.id, send)
+      : () => undefined;
     request.on("close", close);
 
-    for (const event of services.runs.eventsAfter(run.id, afterCursor)) {
+    for (const event of await services.runs.eventsAfterAsync(run.id, afterCursor)) {
       send(event);
       if (closed) break;
+    }
+
+    if (!services.runs.hasInMemoryRun(run.id)) {
+      close();
     }
 
     function send(event: StoredRunEvent): void {

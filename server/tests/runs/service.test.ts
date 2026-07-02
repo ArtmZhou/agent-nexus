@@ -353,4 +353,97 @@ describe("createRunService", () => {
       status: "succeeded"
     });
   });
+
+  test("restores historical events from a persisted JSONL log", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_replay",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "replay me" }));
+    await firstService.emit(run.id, { type: "text_delta", delta: "saved output" });
+    await firstService.finish(run.id);
+
+    const restoredService = createRunService({ runsLogDir });
+
+    expect(await restoredService.eventsAfterAsync(run.id, 0)).toEqual([
+      expect.objectContaining({ id: 1, event: "text_delta", data: { type: "text_delta", delta: "saved output" } }),
+      expect.objectContaining({ id: 2, event: "end", data: { type: "end", status: "succeeded" } })
+    ]);
+  });
+
+  test("filters restored historical events after a cursor", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_replay_cursor",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "replay after cursor" }));
+    await firstService.emit(run.id, { type: "text_delta", delta: "first" });
+    await firstService.emit(run.id, { type: "text_delta", delta: "second" });
+    await firstService.finish(run.id);
+
+    const restoredService = createRunService({ runsLogDir });
+
+    expect((await restoredService.eventsAfterAsync(run.id, 1)).map((event) => event.id)).toEqual([2, 3]);
+  });
+
+  test("returns a clear error event for missing restored event logs", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_missing_log",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "missing log" }));
+    await firstService.finish(run.id);
+    await rm(join(runsLogDir, "run_missing_log.jsonl"), { force: true });
+
+    const restoredService = createRunService({ runsLogDir });
+
+    await expect(restoredService.eventsAfterAsync(run.id, 0)).resolves.toEqual([
+      expect.objectContaining({
+        id: 1,
+        event: "error",
+        data: expect.objectContaining({
+          type: "error",
+          message: "Unable to replay stored run events",
+          code: "run.events_replay_failed"
+        })
+      })
+    ]);
+  });
+
+  test("returns a clear error event for malformed restored event logs", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_malformed_log",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "malformed log" }));
+    await firstService.finish(run.id);
+    await writeFile(join(runsLogDir, "run_malformed_log.jsonl"), "{\"id\":1\n", "utf8");
+
+    const restoredService = createRunService({ runsLogDir });
+
+    await expect(restoredService.eventsAfterAsync(run.id, 5)).resolves.toEqual([
+      expect.objectContaining({
+        id: 6,
+        event: "error",
+        data: expect.objectContaining({
+          type: "error",
+          message: "Unable to replay stored run events",
+          code: "run.events_replay_failed"
+        })
+      })
+    ]);
+  });
 });
+
+function incrementingClock(): () => number {
+  let time = 1_000;
+  return () => time++;
+}

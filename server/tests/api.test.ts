@@ -179,14 +179,15 @@ describe("local agent HTTP API", () => {
     });
   });
 
-  test("GET /api/runs/:id/events rejects restored runs until replay is implemented", async () => {
+  test("GET /api/runs/:id/events replays restored JSONL events", async () => {
     const runsLogDir = await tempDir();
     const firstRuns = createRunService({
-      idGenerator: () => "run_restored_events",
+      idGenerator: () => "run_restored_sse",
       now: incrementingClock(),
       runsLogDir
     });
-    const run = firstRuns.create({ agentId: "fake", prompt: "restore events later" });
+    const run = firstRuns.create({ agentId: "fake", prompt: "restore events" });
+    await firstRuns.emit(run.id, { type: "text_delta", delta: "from disk" });
     await firstRuns.finish(run.id);
     const restoredRuns = createRunService({ runsLogDir });
     const app = createApp({
@@ -196,12 +197,41 @@ describe("local agent HTTP API", () => {
     });
 
     const response = await fetch(`${await listen(app)}/api/runs/${run.id}/events`);
+    const body = await response.text();
 
-    expect(response.status).toBe(409);
-    expect(response.headers.get("content-type")).toContain("application/json");
-    await expect(response.json()).resolves.toEqual({
-      error: "Run event replay is not available for restored runs yet"
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(body).toContain("event: text_delta");
+    expect(body).toContain('"delta":"from disk"');
+    expect(body).toContain("event: end");
+  });
+
+  test("GET /api/runs/:id/events applies cursors to restored JSONL replay", async () => {
+    const runsLogDir = await tempDir();
+    const firstRuns = createRunService({
+      idGenerator: () => "run_restored_sse_cursor",
+      now: incrementingClock(),
+      runsLogDir
     });
+    const run = firstRuns.create({ agentId: "fake", prompt: "restore events after cursor" });
+    await firstRuns.emit(run.id, { type: "text_delta", delta: "skip me" });
+    await firstRuns.emit(run.id, { type: "text_delta", delta: "send me" });
+    await firstRuns.finish(run.id);
+    const restoredRuns = createRunService({ runsLogDir });
+    const app = createApp({
+      registry: fakeRegistry(),
+      runs: restoredRuns,
+      detectAgents: async () => [detectedFake]
+    });
+
+    const response = await fetch(`${await listen(app)}/api/runs/${run.id}/events?after=1`);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).not.toContain("skip me");
+    expect(body).toContain("id: 2\nevent: text_delta");
+    expect(body).toContain('"delta":"send me"');
+    expect(body).toContain("id: 3\nevent: end");
   });
 
   test("POST /api/runs/:id/cancel rejects restored runs without throwing", async () => {
