@@ -19,11 +19,7 @@ describe("createAgentRegistry", () => {
   it("contains required built-in agents", () => {
     const registry = createAgentRegistry();
 
-    expect(registry.get("codex")?.name).toBe("Codex CLI");
-    expect(registry.get("claude")?.name).toBe("Claude Code");
-    expect(registry.get("opencode")?.name).toBe("OpenCode");
-    expect(registry.get("gemini")?.name).toBe("Gemini CLI");
-    expect(registry.get("cursor-agent")?.name).toBe("Cursor Agent");
+    expect(registry.list().map((agent) => agent.id)).toEqual(["codex", "claude", "opencode"]);
   });
 
   it("applies local profile inheritance, prefixed args, env, and default model", () => {

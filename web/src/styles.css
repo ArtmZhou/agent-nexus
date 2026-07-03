@@ -279,7 +279,7 @@ button:focus-visible {
 
 .advanced-panel {
   display: grid;
-  grid-template-columns: 160px minmax(180px, 1fr) minmax(220px, 1.4fr);
+  grid-template-columns: 160px minmax(220px, 1fr);
   gap: 12px;
   padding: 12px;
 }
@@ -551,6 +551,23 @@ button:focus-visible {
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.composer-path-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr);
+}
+
+.composer-path-row label {
+  color: var(--blue);
+}
+
+.composer-message-label {
+  display: block;
+}
+
+.inspector-toggle {
+  width: 100%;
 }
 
 .run-actions {

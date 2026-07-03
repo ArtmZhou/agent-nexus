@@ -20,7 +20,9 @@ export const codexDef: RuntimeAgentDef = {
     modelOption("high", "High"),
   ],
   buildArgs: (context) => {
-    const args = ["exec", "--json"];
+    const args = ["exec"];
+    if (context.resumeSessionId) args.push("resume", context.resumeSessionId);
+    args.push("--json");
     if (context.options?.model) args.push("--model", context.options.model);
     if (context.options?.reasoning) args.push("--reasoning", context.options.reasoning);
     if (context.cwd) args.push("--cwd", context.cwd);
@@ -31,5 +33,6 @@ export const codexDef: RuntimeAgentDef = {
   streamFormat: "json-event-stream",
   eventParser: "codex",
   supportsImagePaths: true,
+  resumesSessionViaCli: true,
   capturesSessionIdFromStream: true,
 };

@@ -21,6 +21,12 @@ export type RunListFilter = {
   status?: RunStatus | RunStatus[];
 };
 
+export type FindLatestSessionOptions = {
+  agentId: string;
+  cwd?: string | null;
+  excludeRunId?: string | null;
+};
+
 export type FinishRunOptions = {
   exitCode?: number | null;
   signal?: string | null;
@@ -75,6 +81,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     const body: RunStatusBody = {
       id,
       agentId: request.agentId,
+      sessionId: request.resumeSessionId ?? null,
       status: "queued",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -153,6 +160,10 @@ export function createRunService(options: RunServiceOptions = {}) {
 
     record.events.push(event);
     record.body.updatedAt = event.timestamp;
+    if (data.type === "status" && data.sessionId) {
+      record.body.sessionId = data.sessionId;
+      void upsertSummary(record);
+    }
     await persistEvent(record, event);
 
     for (const listener of record.listeners) {
@@ -189,6 +200,21 @@ export function createRunService(options: RunServiceOptions = {}) {
 
   function hasInMemoryRun(id: string): boolean {
     return runs.has(id);
+  }
+
+  function findLatestSessionId(filter: FindLatestSessionOptions): string | null {
+    const cwd = normalizeCwd(filter.cwd);
+    const latest = listSummaries()
+      .filter((summary) =>
+        summary.id !== filter.excludeRunId &&
+        summary.agentId === filter.agentId &&
+        normalizeCwd(summary.cwd) === cwd &&
+        typeof summary.sessionId === "string" &&
+        summary.sessionId.trim().length > 0
+      )
+      .at(0);
+
+    return latest?.sessionId ?? null;
   }
 
   function start(id: string, startOptions: StartRunOptions = {}): RunStatusBody {
@@ -358,6 +384,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     eventsAfterAsync,
     statusBody,
     hasInMemoryRun,
+    findLatestSessionId,
     start,
     finish,
     fail,
@@ -412,6 +439,7 @@ function cloneBodyFromSummary(summary: RunSummary | undefined): RunStatusBody | 
 function cloneSummary(summary: RunSummary): RunSummary {
   return {
     ...summary,
+    sessionId: summary.sessionId ?? null,
     extraAllowedDirs: summary.extraAllowedDirs ? [...summary.extraAllowedDirs] : []
   };
 }
@@ -428,4 +456,16 @@ function cloneRequest(request: CreateRunRequest): CreateRunRequest {
     ...request,
     extraAllowedDirs: request.extraAllowedDirs ? [...request.extraAllowedDirs] : undefined
   };
+}
+
+function normalizeCwd(cwd: string | null | undefined): string {
+  const trimmed = (cwd ?? "").trim();
+  if (!trimmed) return "";
+
+  let normalized = trimmed.replace(/\\/gu, "/").replace(/\/+/gu, "/");
+  while (normalized.length > 3 && normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  return /^[a-z]:/iu.test(normalized) ? normalized.toLowerCase() : normalized;
 }

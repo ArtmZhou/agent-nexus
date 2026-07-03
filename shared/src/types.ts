@@ -59,6 +59,7 @@ export type StoredRunEvent = {
 export type RunStatusBody = {
   id: string;
   agentId: string;
+  sessionId: string | null;
   status: RunStatus;
   createdAt: number;
   updatedAt: number;
@@ -86,6 +87,7 @@ export type RunListResponse = {
 
 export type CreateRunRequest = {
   agentId: string;
+  resumeSessionId?: string | null;
   model?: string | null;
   reasoning?: string | null;
   cwd?: string | null;

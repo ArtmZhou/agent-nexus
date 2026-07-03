@@ -45,6 +45,7 @@ describe("createRunService", () => {
     expect(created).toMatchObject({
       id: "run_1",
       agentId: "codex",
+      sessionId: null,
       status: "queued",
       createdAt: 1000,
       updatedAt: 1000,
@@ -371,6 +372,47 @@ describe("createRunService", () => {
       expect.objectContaining({ id: 1, event: "text_delta", data: { type: "text_delta", delta: "saved output" } }),
       expect.objectContaining({ id: 2, event: "end", data: { type: "end", status: "succeeded" } })
     ]);
+  });
+
+  test("captures the latest durable session id for future turns in the same workspace", async () => {
+    let nextId = 1;
+    const service = createRunService({
+      idGenerator: () => `run_session_${nextId++}`,
+      now: incrementingClock()
+    });
+
+    const first = service.create(request({ agentId: "claude", cwd: "D:/repo" }));
+    await service.emit(first.id, { type: "status", label: "init", sessionId: "claude-session-1" });
+    await service.finish(first.id);
+    const second = service.create(request({ agentId: "claude", cwd: "D:/repo" }));
+
+    expect(service.statusBody(first.id)?.sessionId).toBe("claude-session-1");
+    expect(service.listSummaries()[1]).toMatchObject({
+      id: first.id,
+      sessionId: "claude-session-1"
+    });
+    expect(service.findLatestSessionId({
+      agentId: "claude",
+      cwd: "D:/repo",
+      excludeRunId: second.id
+    })).toBe("claude-session-1");
+  });
+
+  test("matches durable sessions across equivalent Windows working paths", async () => {
+    let nextId = 1;
+    const service = createRunService({
+      idGenerator: () => `run_path_${nextId++}`,
+      now: incrementingClock()
+    });
+
+    const first = service.create(request({ agentId: "codex", cwd: "D:\\Repo\\Project\\" }));
+    await service.emit(first.id, { type: "status", label: "thread.started", sessionId: "thread-1" });
+    await service.finish(first.id);
+
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "d:/repo/project"
+    })).toBe("thread-1");
   });
 
   test("filters restored historical events after a cursor", async () => {

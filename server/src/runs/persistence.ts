@@ -70,6 +70,7 @@ function isRunSummary(input: unknown): input is RunSummary {
   return isObject(input) &&
     typeof input.id === "string" &&
     typeof input.agentId === "string" &&
+    isOptionalNullableString(input.sessionId) &&
     typeof input.prompt === "string" &&
     typeof input.status === "string" &&
     runStatuses.has(input.status as RunStatus) &&
@@ -116,6 +117,7 @@ function replayErrorEvent(afterEventId: number): StoredRunEvent {
 function cloneSummary(summary: RunSummary): RunSummary {
   return {
     ...summary,
+    sessionId: summary.sessionId ?? null,
     extraAllowedDirs: summary.extraAllowedDirs ? [...summary.extraAllowedDirs] : []
   };
 }

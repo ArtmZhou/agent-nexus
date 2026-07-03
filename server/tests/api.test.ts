@@ -19,7 +19,16 @@ const fakeDef: RuntimeAgentDef = {
   fallbackModels: [{ id: "fake-model", label: "Fake Model" }],
   reasoningOptions: [{ id: "high", label: "High" }],
   streamFormat: "plain",
+  resumesSessionViaCli: true,
   buildArgs: () => []
+};
+
+const captureStyleDef: RuntimeAgentDef = {
+  ...fakeDef,
+  id: "capture",
+  name: "Capture Agent",
+  resumesSessionViaCli: false,
+  capturesSessionIdFromStream: true
 };
 
 const detectedFake: DetectedAgent = {
@@ -113,7 +122,80 @@ describe("local agent HTTP API", () => {
     expect(startRun).toHaveBeenCalledWith(expect.objectContaining({
       runId: "run_api",
       request: expect.objectContaining({ agentId: "fake", prompt: "hello" }),
-      def: fakeDef
+      def: fakeDef,
+      resumeSessionId: null
+    }));
+  });
+
+  test("POST /api/runs resumes the latest matching session when the runtime supports it", async () => {
+    let nextId = 1;
+    const runs = createRunService({ idGenerator: () => `run_resume_${nextId++}`, now: incrementingClock() });
+    const previous = runs.create({ agentId: "fake", prompt: "first", cwd: "D:/repo" });
+    await runs.emit(previous.id, { type: "status", label: "init", sessionId: "durable-session-1" });
+    await runs.finish(previous.id);
+    const startRun = vi.fn((options: StartAgentRunOptions): AgentRunHandle => ({
+      child: null,
+      done: runs.wait(options.runId),
+      cancel: vi.fn(async () => runs.cancel(options.runId, { message: "canceled" }))
+    }));
+    const app = createApp({
+      registry: fakeRegistry(),
+      runs,
+      detectAgents: async () => [detectedFake],
+      startRun
+    });
+
+    const response = await fetch(`${await listen(app)}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agentId: "fake",
+        prompt: "second",
+        cwd: "D:/repo"
+      })
+    });
+
+    expect(response.status).toBe(201);
+    expect(startRun).toHaveBeenCalledWith(expect.objectContaining({
+      resumeSessionId: "durable-session-1",
+      request: expect.objectContaining({
+        prompt: "second",
+        resumeSessionId: "durable-session-1"
+      })
+    }));
+  });
+
+  test("POST /api/runs resumes capture-style runtimes with stored stream session ids", async () => {
+    let nextId = 1;
+    const runs = createRunService({ idGenerator: () => `run_capture_${nextId++}`, now: incrementingClock() });
+    const previous = runs.create({ agentId: "capture", prompt: "first", cwd: "D:/Repo" });
+    await runs.emit(previous.id, { type: "status", label: "thread.started", sessionId: "thread-capture-1" });
+    await runs.finish(previous.id);
+    const startRun = vi.fn((options: StartAgentRunOptions): AgentRunHandle => ({
+      child: null,
+      done: runs.wait(options.runId),
+      cancel: vi.fn(async () => runs.cancel(options.runId, { message: "canceled" }))
+    }));
+    const app = createApp({
+      registry: fakeRegistry([captureStyleDef]),
+      runs,
+      detectAgents: async () => [detectedFake],
+      startRun
+    });
+
+    const response = await fetch(`${await listen(app)}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agentId: "capture",
+        prompt: "second",
+        cwd: "d:\\repo\\"
+      })
+    });
+
+    expect(response.status).toBe(201);
+    expect(startRun).toHaveBeenCalledWith(expect.objectContaining({
+      resumeSessionId: "thread-capture-1"
     }));
   });
 
@@ -324,11 +406,11 @@ describe("local agent HTTP API", () => {
   });
 });
 
-function fakeRegistry(): AgentRegistry {
+function fakeRegistry(defs: RuntimeAgentDef[] = [fakeDef]): AgentRegistry {
   return {
     diagnostics: [],
-    get: (id) => (id === fakeDef.id ? fakeDef : undefined),
-    list: () => [fakeDef]
+    get: (id) => defs.find((def) => def.id === id),
+    list: () => defs
   };
 }
 

@@ -92,6 +92,7 @@ describe("App", () => {
         return jsonResponse({
           id: "run-1",
           agentId: "codex",
+          sessionId: null,
           status: "running",
           createdAt: 100,
           updatedAt: 200,
@@ -114,6 +115,7 @@ describe("App", () => {
         return jsonResponse({
           id: "run-1",
           agentId: "codex",
+          sessionId: null,
           status: "canceled",
           createdAt: 100,
           updatedAt: 300,
@@ -146,28 +148,35 @@ describe("App", () => {
     fireEvent.click(unavailableClaude);
     expect(screen.getByRole("button", { name: /Agent Codex/i })).toBeInTheDocument();
     const inspector = screen.getByRole("complementary", { name: "Run inspector" });
-    expect(within(inspector).getByText("No run selected")).toBeInTheDocument();
-    expect(within(inspector).getByText("AGENT_NEXUS_AGENTS_CONFIG")).toBeInTheDocument();
-    expect(within(inspector).getByText("Claude is not on PATH")).toBeInTheDocument();
+    expect(within(inspector).getByRole("button", { name: "Show inspector" })).toBeInTheDocument();
+    expect(within(inspector).queryByText("No run selected")).not.toBeInTheDocument();
+    expect(within(inspector).queryByText("AGENT_NEXUS_AGENTS_CONFIG")).not.toBeInTheDocument();
+    expect(within(inspector).queryByText("Claude is not on PATH")).not.toBeInTheDocument();
+    expect(screen.queryByText("Diagnostics")).not.toBeInTheDocument();
+    expect(screen.queryByText("Raw events")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     const details = await screen.findByRole("complementary", { name: "Run details" });
-    expect(within(details).getByText("Claude is not on PATH")).toBeInTheDocument();
     expect(within(details).getByText("No run selected")).toBeInTheDocument();
     expect(within(details).getByText("Agent config")).toBeInTheDocument();
     expect(within(details).getByText("D:/agent-nexus/agents.local.json")).toBeInTheDocument();
     expect(within(details).getByText("AGENT_NEXUS_AGENTS_CONFIG")).toBeInTheDocument();
     expect(within(details).getByText(/work-codex/u)).toBeInTheDocument();
+    expect(within(details).queryByText("Diagnostics")).not.toBeInTheDocument();
+    expect(within(details).queryByText("Raw events")).not.toBeInTheDocument();
+    expect(within(details).queryByText("Claude is not on PATH")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close details" }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Run details" })).not.toBeInTheDocument());
 
+    expect(screen.getByRole("textbox", { name: "Working path" })).toHaveValue("");
+    expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Working path" }), { target: { value: "D:/work" } });
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByRole("combobox", { name: "Reasoning" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
-    fireEvent.change(screen.getByLabelText("Working directory"), { target: { value: "D:/work" } });
     fireEvent.change(screen.getByLabelText("Extra allowed dirs"), { target: { value: "D:/work/shared\nD:/work/docs" } });
 
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Build the streaming console" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Build the streaming console" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -226,6 +235,7 @@ describe("App", () => {
         return jsonResponse({
           id: "run-2",
           agentId: "codex",
+          sessionId: null,
           status: "running",
           createdAt: 100,
           updatedAt: 100,
@@ -248,6 +258,7 @@ describe("App", () => {
         return jsonResponse({
           id: "run-2",
           agentId: "codex",
+          sessionId: null,
           status: "failed",
           createdAt: 100,
           updatedAt: 200,
@@ -270,7 +281,7 @@ describe("App", () => {
 
     await screen.findByRole("heading", { name: "Agent Nexus" });
 
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Make it work" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Make it work" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -337,6 +348,7 @@ describe("App", () => {
         return jsonResponse({
           id: "run-3",
           agentId: "claude",
+          sessionId: null,
           status: "running",
           createdAt: 100,
           updatedAt: 100,
@@ -369,7 +381,7 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument());
 
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Run without Codex reasoning" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Run without Codex reasoning" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -472,6 +484,7 @@ describe("App", () => {
         return jsonResponse({
           id: "run-available",
           agentId: "codex",
+          sessionId: null,
           status: "running",
           createdAt: 100,
           updatedAt: 100,
@@ -500,7 +513,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
     const agentChoices = await screen.findByRole("group", { name: "Agents" });
     expect(within(agentChoices).getByRole("button", { name: /Claude/i })).toHaveAttribute("aria-pressed", "false");
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Use the available agent" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Use the available agent" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -552,7 +565,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /Agent Claude/i }));
     const agentChoices = await screen.findByRole("group", { name: "Agents" });
     expect(within(agentChoices).getByRole("button", { name: /Claude/i })).toHaveAttribute("aria-pressed", "false");
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Cannot run this" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Cannot run this" } });
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
@@ -588,6 +601,7 @@ describe("App", () => {
             {
               id: "run-history",
               agentId: "codex",
+              sessionId: "session-history",
               status: "succeeded",
               createdAt: 100,
               updatedAt: 200,
@@ -774,6 +788,7 @@ describe("App", () => {
             {
               id: "run-copy",
               agentId: "codex",
+              sessionId: null,
               status: "succeeded",
               createdAt: 100,
               updatedAt: 200,
@@ -807,7 +822,7 @@ describe("App", () => {
 
     expect(await screen.findByText("Read-only history")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Use prompt again" }));
-    expect(screen.getByLabelText("Prompt")).toHaveValue("Reuse this prompt");
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Reuse this prompt");
     expect(screen.getByRole("button", { name: /Reuse this prompt/i })).toBeInTheDocument();
   });
 
@@ -833,10 +848,10 @@ describe("App", () => {
               diagnostics: []
             },
             {
-              id: "gemini",
-              name: "Gemini",
+              id: "opencode",
+              name: "OpenCode",
               available: true,
-              models: [{ id: "gemini-pro", label: "Gemini Pro" }],
+              models: [{ id: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4" }],
               modelsSource: "fallback",
               authStatus: "ok",
               diagnostics: []
@@ -862,8 +877,8 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryByRole("group", { name: "Agents" })).not.toBeInTheDocument());
 
     fireEvent.keyDown(trigger, { key: "Enter" });
-    fireEvent.keyDown(await screen.findByRole("button", { name: /Gemini/i }), { key: "Enter" });
-    expect(screen.getByRole("button", { name: /Agent Gemini/i })).toHaveTextContent("GM");
+    fireEvent.keyDown(await screen.findByRole("button", { name: /OpenCode/i }), { key: "Enter" });
+    expect(screen.getByRole("button", { name: /Agent OpenCode/i })).toHaveTextContent("OC");
   });
 });
 
@@ -882,6 +897,7 @@ function runSummary(overrides: Partial<Record<string, unknown>>) {
   return {
     id: "run-history",
     agentId: "codex",
+    sessionId: null,
     status: "succeeded",
     createdAt: 100,
     updatedAt: 200,

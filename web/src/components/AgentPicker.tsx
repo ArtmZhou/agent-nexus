@@ -12,8 +12,6 @@ const iconByAgentId: Record<string, string> = {
   codex: "CX",
   claude: "CL",
   opencode: "OC",
-  gemini: "GM",
-  "cursor-agent": "CA",
 };
 
 export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }: AgentPickerProps) {

@@ -117,15 +117,6 @@ export function RunConsole(props: RunConsoleProps) {
           )}
 
           <label>
-            Working directory
-            <input
-              value={props.state.cwd}
-              onChange={(event) => props.onStateChange({ ...props.state, cwd: event.target.value })}
-              aria-label="Working directory"
-            />
-          </label>
-
-          <label>
             Extra allowed dirs
             <textarea
               value={props.state.extraAllowedDirs}
@@ -153,21 +144,29 @@ export function RunConsole(props: RunConsoleProps) {
           <RunInspector
             variant="embedded"
             run={props.selectedRun}
-            rawEvents={props.selectedRunRawEvents}
-            agents={props.agents}
-            diagnostics={props.diagnostics}
             agentsConfig={props.agentsConfig}
           />
         </div>
       </div>
 
       <section className="composer" aria-label="Prompt composer">
-        <label>
-          Prompt
+        <div className="composer-path-row">
+          <label>
+            Working path
+            <input
+              value={props.state.cwd}
+              onChange={(event) => props.onStateChange({ ...props.state, cwd: event.target.value })}
+              aria-label="Working path"
+              placeholder="Use server default"
+            />
+          </label>
+        </div>
+        <label className="composer-message-label">
           <textarea
             value={props.state.prompt}
             onChange={(event) => props.onStateChange({ ...props.state, prompt: event.target.value })}
-            aria-label="Prompt"
+            aria-label="Message"
+            placeholder="Ask the selected agent..."
             rows={4}
           />
         </label>
@@ -191,9 +190,6 @@ export function RunConsole(props: RunConsoleProps) {
       {props.detailsOpen && (
         <RunInspector
           run={props.selectedRun}
-          rawEvents={props.selectedRunRawEvents}
-          agents={props.agents}
-          diagnostics={props.diagnostics}
           agentsConfig={props.agentsConfig}
           onClose={() => props.onDetailsOpenChange(false)}
         />

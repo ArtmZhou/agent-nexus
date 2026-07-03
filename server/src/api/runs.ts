@@ -121,12 +121,18 @@ export function createRunsRouter(services: RunsRouterServices): Router {
         return;
       }
 
-      const created = services.runs.create(parsed.request);
+      const resumeSessionId = parsed.request.resumeSessionId ?? reusableSessionId(services, def, parsed.request);
+      const requestWithSession: CreateRunRequest = {
+        ...parsed.request,
+        resumeSessionId
+      };
+      const created = services.runs.create(requestWithSession);
       const handle = services.startRun({
         runs: services.runs,
         runId: created.id,
-        request: parsed.request,
-        def
+        request: requestWithSession,
+        def,
+        resumeSessionId
       });
       services.activeHandles.set(created.id, handle);
       void handle.done.finally(() => {
@@ -207,10 +213,15 @@ function parseCreateRunRequest(input: unknown): { ok: true; request: CreateRunRe
     return { ok: false, error: "extraAllowedDirs must be an array of strings" };
   }
 
+  if (input.resumeSessionId !== undefined && input.resumeSessionId !== null && typeof input.resumeSessionId !== "string") {
+    return { ok: false, error: "resumeSessionId must be a string or null" };
+  }
+
   return {
     ok: true,
     request: {
       agentId: input.agentId,
+      resumeSessionId: input.resumeSessionId as string | null | undefined,
       prompt: input.prompt,
       model: input.model as string | null | undefined,
       reasoning: input.reasoning as string | null | undefined,
@@ -218,6 +229,17 @@ function parseCreateRunRequest(input: unknown): { ok: true; request: CreateRunRe
       extraAllowedDirs: input.extraAllowedDirs as string[] | undefined
     }
   };
+}
+
+function reusableSessionId(services: RunsRouterServices, def: ReturnType<AgentRegistry["get"]>, request: CreateRunRequest): string | null {
+  if (!def || (!def.resumesSessionViaCli && !def.resumesSessionViaAcpLoad && !def.capturesSessionIdFromStream)) {
+    return null;
+  }
+
+  return services.runs.findLatestSessionId({
+    agentId: request.agentId,
+    cwd: request.cwd ?? null
+  });
 }
 
 function parseStatusFilter(input: unknown): RunStatus | "active" | "invalid" | null {
