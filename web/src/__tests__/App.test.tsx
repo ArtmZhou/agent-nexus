@@ -134,8 +134,8 @@ describe("App", () => {
     expect(screen.getByRole("main", { name: "Chat workbench" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Agent Codex/i })).toHaveTextContent("CX");
     fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
-    expect(await screen.findByRole("option", { name: /Codex/i })).toHaveTextContent("CX");
-    const unavailableClaude = screen.getByRole("option", { name: /Claude/i });
+    expect(await screen.findByRole("menuitemradio", { name: /Codex/i })).toHaveTextContent("CX");
+    const unavailableClaude = screen.getByRole("menuitemradio", { name: /Claude/i });
     expect(unavailableClaude).toHaveTextContent("CL");
     expect(unavailableClaude).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(unavailableClaude);
@@ -350,7 +350,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
     fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
-    fireEvent.click(await screen.findByRole("option", { name: /Claude/i }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Claude/i }));
 
     await waitFor(() => expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument());
 
@@ -403,9 +403,177 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: /Agent Work Codex/i })).toHaveTextContent("CX");
     fireEvent.click(screen.getByRole("button", { name: /Agent Work Codex/i }));
-    expect(await screen.findByRole("option", { name: /Custom Agent/i })).toHaveTextContent("AG");
-    fireEvent.click(screen.getByRole("option", { name: /Custom Agent/i }));
+    expect(await screen.findByRole("menuitemradio", { name: /Custom Agent/i })).toHaveTextContent("AG");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Custom Agent/i }));
     expect(screen.getByRole("button", { name: /Agent Custom Agent/i })).toHaveTextContent("AG");
+  });
+
+  test("defaults to the first available agent and does not run unavailable agents", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "claude",
+              baseAgentId: "claude",
+              name: "Claude",
+              available: false,
+              models: [{ id: "sonnet", label: "Sonnet" }],
+              modelsSource: "fallback",
+              authStatus: "missing",
+              diagnostics: []
+            },
+            {
+              id: "codex",
+              name: "Codex",
+              available: true,
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          agentId: "codex",
+          model: "gpt-5",
+          prompt: "Use the available agent"
+        });
+
+        return jsonResponse({
+          id: "run-available",
+          agentId: "codex",
+          status: "running",
+          createdAt: 100,
+          updatedAt: 100,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: null,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: /Agent Codex/i })).toHaveTextContent("CX");
+    fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
+    expect(screen.getByRole("menuitemradio", { name: /Claude/i })).toHaveAttribute("aria-checked", "false");
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Use the available agent" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs",
+      expect.objectContaining({
+        method: "POST"
+      })
+    );
+  });
+
+  test("keeps run disabled when every agent is unavailable", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "claude",
+              baseAgentId: "claude",
+              name: "Claude",
+              available: false,
+              models: [{ id: "sonnet", label: "Sonnet" }],
+              modelsSource: "fallback",
+              authStatus: "missing",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: /Agent Claude/i })).toHaveTextContent("CL");
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Cannot run this" } });
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  test("opens, selects, and closes the agent menu from the keyboard", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "codex",
+              name: "Codex",
+              available: true,
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            },
+            {
+              id: "gemini",
+              name: "Gemini",
+              available: true,
+              models: [{ id: "gemini-pro", label: "Gemini Pro" }],
+              modelsSource: "fallback",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const trigger = await screen.findByRole("button", { name: /Agent Codex/i });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(await screen.findByRole("menu", { name: "Agents" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "Agents" })).not.toBeInTheDocument());
+
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("menuitemradio", { name: /Gemini/i }), { key: "Enter" });
+    expect(screen.getByRole("button", { name: /Agent Gemini/i })).toHaveTextContent("GM");
   });
 });
 

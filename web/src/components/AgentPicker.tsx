@@ -30,10 +30,21 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
         type="button"
         className="agent-picker-button"
         aria-label={`Agent ${selectedAgent?.name ?? "none"}`}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={listboxId}
         onClick={() => setOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setOpen(false);
+            return;
+          }
+
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }
+        }}
       >
         <AgentIcon agent={selectedAgent} />
         <span className="agent-picker-copy">
@@ -43,19 +54,31 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
       </button>
 
       {open && (
-        <div className="agent-picker-menu" id={listboxId} role="listbox" aria-label="Agents">
+        <div
+          className="agent-picker-menu"
+          id={listboxId}
+          role="menu"
+          aria-label="Agents"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setOpen(false);
+            }
+          }}
+        >
           {agents.map((agent) => (
             <button
               key={agent.id}
               type="button"
-              role="option"
-              aria-selected={agent.id === selectedAgent?.id}
+              role="menuitemradio"
+              aria-checked={agent.id === selectedAgent?.id}
               aria-disabled={!agent.available}
               className={`agent-picker-option ${agent.id === selectedAgent?.id ? "selected" : ""}`}
-              onClick={() => {
-                if (!agent.available) return;
-                onSelect(agent.id);
-                setOpen(false);
+              onClick={() => selectAgent(agent)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                selectAgent(agent);
               }}
             >
               <AgentIcon agent={agent} />
@@ -69,6 +92,12 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
       )}
     </div>
   );
+
+  function selectAgent(agent: DetectedAgent): void {
+    if (!agent.available) return;
+    onSelect(agent.id);
+    setOpen(false);
+  }
 }
 
 function AgentIcon({ agent }: { agent: DetectedAgent | null }) {

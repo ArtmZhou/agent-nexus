@@ -38,6 +38,7 @@ type RunConsoleProps = {
 
 export function RunConsole(props: RunConsoleProps) {
   const selectedAgent = props.agents.find((agent) => agent.id === props.selectedAgentId) ?? props.agents[0] ?? null;
+  const canRunSelectedAgent = selectedAgent?.available === true && selectedAgent.id === props.selectedAgentId;
   const reasoningOptions = selectedAgent?.reasoningOptions ?? [];
   const selectedReasoningValid = reasoningOptions.some((option) => option.id === props.state.reasoning);
 
@@ -143,7 +144,7 @@ export function RunConsole(props: RunConsoleProps) {
             className="primary-button"
             type="button"
             onClick={props.onRun}
-            disabled={props.running || !props.state.prompt.trim() || !props.selectedAgentId}
+            disabled={props.running || !props.state.prompt.trim() || !canRunSelectedAgent}
           >
             Run
           </button>

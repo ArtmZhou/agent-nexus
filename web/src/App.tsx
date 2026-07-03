@@ -33,7 +33,7 @@ export default function App() {
   const subscriptionRef = useRef<RunEventSubscription | null>(null);
 
   const selectedAgent = useMemo(
-    () => agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null,
+    () => agents.find((agent) => agent.id === selectedAgentId) ?? agents.find((agent) => agent.available) ?? null,
     [agents, selectedAgentId]
   );
   const running = currentRun?.status === "queued" || currentRun?.status === "running";
@@ -45,10 +45,15 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedAgent && agents.length === 0) return;
-    const nextAgent = selectedAgent ?? agents[0];
-    if (!nextAgent) return;
+    const nextAgent = selectedAgent ?? agents.find((agent) => agent.available) ?? null;
 
-    if (!selectedAgentId) {
+    if (!nextAgent) {
+      if (selectedAgentId) setSelectedAgentId(null);
+      if (selectedModel) setSelectedModel("");
+      return;
+    }
+
+    if (selectedAgentId !== nextAgent.id) {
       setSelectedAgentId(nextAgent.id);
     }
 
@@ -69,9 +74,13 @@ export default function App() {
       setAgents(response.agents);
       setDiagnostics(response.diagnostics);
       setAgentsConfig(response.config);
-      if (!selectedAgentId && response.agents[0]) {
-        setSelectedAgentId(response.agents[0].id);
-        setSelectedModel(response.agents[0].models[0]?.id ?? "");
+      const nextAgent = chooseRunnableAgent(response.agents, selectedAgentId);
+      if (nextAgent) {
+        setSelectedAgentId(nextAgent.id);
+        setSelectedModel(nextAgent.models[0]?.id ?? "");
+      } else {
+        setSelectedAgentId(null);
+        setSelectedModel("");
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -82,6 +91,7 @@ export default function App() {
 
   function selectAgent(agentId: string): void {
     const agent = agents.find((candidate) => candidate.id === agentId);
+    if (!agent?.available) return;
     setSelectedAgentId(agentId);
     setSelectedModel(agent?.models[0]?.id ?? "");
     setConsoleState((previous) =>
@@ -92,7 +102,7 @@ export default function App() {
   }
 
   async function startRun(): Promise<void> {
-    if (!selectedAgentId) return;
+    if (!selectedAgentId || !selectedAgent?.available) return;
     const prompt = consoleState.prompt;
     if (!prompt.trim()) return;
 
@@ -190,4 +200,9 @@ export default function App() {
 
 function agentSupportsReasoning(agent: DetectedAgent, reasoning: string): boolean {
   return (agent.reasoningOptions ?? []).some((option) => option.id === reasoning);
+}
+
+function chooseRunnableAgent(agents: DetectedAgent[], selectedAgentId: string | null): DetectedAgent | null {
+  const current = agents.find((agent) => agent.id === selectedAgentId && agent.available);
+  return current ?? agents.find((agent) => agent.available) ?? null;
 }
