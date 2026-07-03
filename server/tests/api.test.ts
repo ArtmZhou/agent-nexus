@@ -256,6 +256,7 @@ describe("local agent HTTP API", () => {
     const body = await response.text();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(body).toContain("event: error");
     expect(body).toContain("run.events_replay_failed");
   });
