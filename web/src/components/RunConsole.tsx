@@ -1,8 +1,9 @@
-import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
+import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, RunSummary, StoredRunEvent } from "@agent-nexus/shared";
 import type { AgentsConfig } from "../api.js";
 import { AgentPicker } from "./AgentPicker.js";
-import { MessageStream } from "./MessageStream.js";
+import { HistoryRail } from "./HistoryRail.js";
 import { RunInspector } from "./RunInspector.js";
+import { TranscriptPane } from "./TranscriptPane.js";
 
 export type ConsoleState = {
   prompt: string;
@@ -19,8 +20,14 @@ type RunConsoleProps = {
   selectedModel: string;
   state: ConsoleState;
   currentRun: RunStatusBody | null;
-  events: RunEvent[];
-  rawEvents: StoredRunEvent[];
+  runSummaries: RunSummary[];
+  selectedRunId: string | null;
+  selectedRunPrompt: string;
+  selectedRunEvents: RunEvent[];
+  selectedRunRawEvents: StoredRunEvent[];
+  selectedRun: RunStatusBody | null;
+  loadingRunEvents: boolean;
+  runEventsError: string | null;
   running: boolean;
   loadingAgents: boolean;
   detailsOpen: boolean;
@@ -31,6 +38,7 @@ type RunConsoleProps = {
   onStateChange: (state: ConsoleState) => void;
   onRun: () => void;
   onCancel: () => void;
+  onRunSelect: (runId: string) => void;
   onRefresh: () => void;
   onDetailsOpenChange: (open: boolean) => void;
   onAdvancedOpenChange: (open: boolean) => void;
@@ -126,7 +134,16 @@ export function RunConsole(props: RunConsoleProps) {
         </section>
       )}
 
-      <MessageStream currentRun={props.currentRun} events={props.events} prompt={props.submittedPrompt} />
+      <div className="workbench-grid">
+        <HistoryRail runs={props.runSummaries} selectedRunId={props.selectedRunId} onSelect={props.onRunSelect} />
+        <TranscriptPane
+          currentRun={props.selectedRun}
+          events={props.selectedRunEvents}
+          prompt={props.selectedRunPrompt}
+          loading={props.loadingRunEvents}
+          error={props.runEventsError}
+        />
+      </div>
 
       <section className="composer" aria-label="Prompt composer">
         <label>
@@ -157,8 +174,8 @@ export function RunConsole(props: RunConsoleProps) {
 
       {props.detailsOpen && (
         <RunInspector
-          run={props.currentRun}
-          rawEvents={props.rawEvents}
+          run={props.selectedRun}
+          rawEvents={props.selectedRunRawEvents}
           agents={props.agents}
           diagnostics={props.diagnostics}
           agentsConfig={props.agentsConfig}

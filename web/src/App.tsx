@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
-import { cancelRun, createRun, fetchAgents, fetchRun, subscribeRunEvents, type AgentsConfig, type RunEventSubscription } from "./api.js";
+import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, RunSummary, StoredRunEvent } from "@agent-nexus/shared";
+import {
+  cancelRun,
+  createRun,
+  fetchAgents,
+  fetchRun,
+  fetchRunEvents,
+  fetchRuns,
+  subscribeRunEvents,
+  type AgentsConfig,
+  type RunEventSubscription
+} from "./api.js";
 import { RunConsole, type ConsoleState } from "./components/RunConsole.js";
 
 const initialConsoleState: ConsoleState = {
@@ -25,6 +35,12 @@ export default function App() {
   const [currentRun, setCurrentRun] = useState<RunStatusBody | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [rawEvents, setRawEvents] = useState<StoredRunEvent[]>([]);
+  const [runSummaries, setRunSummaries] = useState<RunSummary[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [eventsByRunId, setEventsByRunId] = useState<Record<string, RunEvent[]>>({});
+  const [rawEventsByRunId, setRawEventsByRunId] = useState<Record<string, StoredRunEvent[]>>({});
+  const [loadingRunEvents, setLoadingRunEvents] = useState(false);
+  const [runEventsError, setRunEventsError] = useState<string | null>(null);
   const [loadingAgents, setLoadingAgents] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -37,9 +53,18 @@ export default function App() {
     [agents, selectedAgentId]
   );
   const running = currentRun?.status === "queued" || currentRun?.status === "running";
+  const selectedRunSummary = useMemo(
+    () => runSummaries.find((run) => run.id === selectedRunId) ?? null,
+    [runSummaries, selectedRunId]
+  );
+  const selectedRun = selectedRunSummary?.id === currentRun?.id ? currentRun : selectedRunSummary;
+  const selectedRunPrompt = selectedRunSummary?.prompt ?? submittedPrompt;
+  const selectedRunEvents = selectedRunId ? eventsByRunId[selectedRunId] ?? [] : events;
+  const selectedRunRawEvents = selectedRunId ? rawEventsByRunId[selectedRunId] ?? [] : rawEvents;
 
   useEffect(() => {
     void refreshAgents();
+    void refreshRuns();
     return () => subscriptionRef.current?.close();
   }, []);
 
@@ -89,6 +114,41 @@ export default function App() {
     }
   }
 
+  async function refreshRuns(): Promise<void> {
+    try {
+      const response = await fetchRuns();
+      setRunSummaries(response.runs);
+      const nextRunId = selectedRunId ?? response.runs[0]?.id ?? null;
+      setSelectedRunId(nextRunId);
+      if (nextRunId) {
+        void loadRunEvents(nextRunId);
+      }
+    } catch (caught) {
+      setRunEventsError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
+  function selectRun(runId: string): void {
+    setSelectedRunId(runId);
+    if (!rawEventsByRunId[runId]) {
+      void loadRunEvents(runId);
+    }
+  }
+
+  async function loadRunEvents(runId: string): Promise<void> {
+    setLoadingRunEvents(true);
+    setRunEventsError(null);
+    try {
+      const storedEvents = await fetchRunEvents(runId);
+      setRawEventsByRunId((previous) => ({ ...previous, [runId]: storedEvents }));
+      setEventsByRunId((previous) => ({ ...previous, [runId]: storedEvents.map((event) => event.data) }));
+    } catch (caught) {
+      setRunEventsError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setLoadingRunEvents(false);
+    }
+  }
+
   function selectAgent(agentId: string): void {
     const agent = agents.find((candidate) => candidate.id === agentId);
     if (!agent?.available) return;
@@ -117,30 +177,53 @@ export default function App() {
       const reasoning = selectedAgent && agentSupportsReasoning(selectedAgent, consoleState.reasoning)
         ? consoleState.reasoning
         : "";
+      const extraAllowedDirs = consoleState.extraAllowedDirs
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter(Boolean);
       const run = await createRun({
         agentId: selectedAgentId,
         model: selectedModel || null,
         reasoning: reasoning.trim() || null,
         cwd: consoleState.cwd.trim() || null,
         prompt,
-        extraAllowedDirs: consoleState.extraAllowedDirs
-          .split(/\r?\n/u)
-          .map((line) => line.trim())
-          .filter(Boolean)
+        extraAllowedDirs
       });
 
       setCurrentRun(run);
+      const summary: RunSummary = {
+        ...run,
+        prompt,
+        model: selectedModel || null,
+        reasoning: reasoning.trim() || null,
+        cwd: consoleState.cwd.trim() || null,
+        extraAllowedDirs
+      };
+      setRunSummaries((previous) => [summary, ...previous.filter((item) => item.id !== run.id)]);
+      setSelectedRunId(run.id);
+      setEventsByRunId((previous) => ({ ...previous, [run.id]: [] }));
+      setRawEventsByRunId((previous) => ({ ...previous, [run.id]: [] }));
       subscriptionRef.current = subscribeRunEvents(
         run.id,
         (storedEvent) => {
           setRawEvents((previous) => [...previous, storedEvent]);
           setEvents((previous) => [...previous, storedEvent.data]);
+          setRawEventsByRunId((previous) => ({ ...previous, [run.id]: [...(previous[run.id] ?? []), storedEvent] }));
+          setEventsByRunId((previous) => ({ ...previous, [run.id]: [...(previous[run.id] ?? []), storedEvent.data] }));
           if (storedEvent.data.type === "end") {
             const terminalStatus = storedEvent.data.status;
             setCurrentRun((previous) => previous ? { ...previous, status: terminalStatus, updatedAt: Date.now() } : previous);
+            setRunSummaries((previous) =>
+              previous.map((item) => item.id === run.id ? { ...item, status: terminalStatus, updatedAt: Date.now() } : item)
+            );
             subscriptionRef.current?.close();
             void fetchRun(run.id)
-              .then((latest) => setCurrentRun(latest))
+              .then((latest) => {
+                setCurrentRun(latest);
+                setRunSummaries((previous) =>
+                  previous.map((item) => item.id === latest.id ? { ...item, ...latest } : item)
+                );
+              })
               .catch(() => undefined);
           }
         },
@@ -178,8 +261,14 @@ export default function App() {
         selectedModel={selectedModel}
         state={consoleState}
         currentRun={currentRun}
-        events={events}
-        rawEvents={rawEvents}
+        runSummaries={runSummaries}
+        selectedRunId={selectedRunId}
+        selectedRunPrompt={selectedRunPrompt}
+        selectedRunEvents={selectedRunEvents}
+        selectedRunRawEvents={selectedRunRawEvents}
+        selectedRun={selectedRun}
+        loadingRunEvents={loadingRunEvents}
+        runEventsError={runEventsError}
         running={running}
         loadingAgents={loadingAgents}
         detailsOpen={detailsOpen}
@@ -190,6 +279,7 @@ export default function App() {
         onStateChange={setConsoleState}
         onRun={startRun}
         onCancel={stopRun}
+        onRunSelect={selectRun}
         onRefresh={refreshAgents}
         onDetailsOpenChange={setDetailsOpen}
         onAdvancedOpenChange={setAdvancedOpen}

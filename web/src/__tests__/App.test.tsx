@@ -530,6 +530,77 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
+  test("loads persistent history and replays a selected run transcript", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "codex",
+              baseAgentId: "codex",
+              name: "Codex",
+              available: true,
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs") {
+        return jsonResponse({
+          runs: [
+            {
+              id: "run-history",
+              agentId: "codex",
+              status: "succeeded",
+              createdAt: 100,
+              updatedAt: 200,
+              cancelRequested: false,
+              childPid: null,
+              processGroupId: null,
+              exitCode: 0,
+              signal: null,
+              error: null,
+              errorCode: null,
+              eventsLogPath: "D:/runs/run-history.jsonl",
+              prompt: "Summarize the repo",
+              model: "gpt-5",
+              reasoning: null,
+              cwd: "D:/repo",
+              extraAllowedDirs: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs/run-history/events") {
+        return sseResponse([
+          { id: 1, event: "text_delta", data: { type: "text_delta", delta: "Repo summary" } },
+          { id: 2, event: "end", data: { type: "end", status: "succeeded" } }
+        ]);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("complementary", { name: "Run history" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Summarize the repo/i })).toBeInTheDocument();
+    expect(await screen.findByText("Repo summary")).toBeInTheDocument();
+  });
+
   test("opens, selects, and closes the agent menu from the keyboard", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -587,4 +658,16 @@ function jsonResponse(body: unknown): Response {
     status: 200,
     headers: { "content-type": "application/json" }
   });
+}
+
+function sseResponse(events: Array<{ id: number; event: string; data: unknown }>): Response {
+  return new Response(
+    events
+      .map((event) => [`id: ${event.id}`, `event: ${event.event}`, `data: ${JSON.stringify(event.data)}`, "", ""].join("\n"))
+      .join(""),
+    {
+      status: 200,
+      headers: { "content-type": "text/event-stream" }
+    }
+  );
 }

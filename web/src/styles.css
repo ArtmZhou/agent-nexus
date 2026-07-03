@@ -282,6 +282,70 @@ button:focus-visible {
   padding: 12px;
 }
 
+.workbench-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.history-rail {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-soft);
+  color: var(--text);
+  text-align: left;
+}
+
+.history-item.selected {
+  border-color: var(--blue);
+  background: var(--surface-tint);
+}
+
+.history-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.history-copy strong,
+.history-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.transcript-pane {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .message-stream {
   display: grid;
   align-content: start;
@@ -653,6 +717,17 @@ button:focus-visible {
   background: var(--amber);
 }
 
+.status-dot.succeeded,
+.status-dot.running,
+.status-dot.queued {
+  background: var(--green);
+}
+
+.status-dot.failed,
+.status-dot.canceled {
+  background: var(--red);
+}
+
 .agent-main,
 .agent-meta {
   display: grid;
@@ -702,6 +777,16 @@ button:focus-visible {
 
   .profile-example {
     grid-column: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .workbench-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .history-rail {
+    max-height: 220px;
   }
 }
 

@@ -1,4 +1,12 @@
-import type { AgentDiagnostic, CreateRunRequest, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
+import type {
+  AgentDiagnostic,
+  CreateRunRequest,
+  DetectedAgent,
+  RunEvent,
+  RunListResponse,
+  RunStatusBody,
+  StoredRunEvent
+} from "@agent-nexus/shared";
 
 export type AgentsConfig = {
   agentsConfigPath: string;
@@ -31,6 +39,22 @@ const runEventTypes: RunEvent["type"][] = [
 
 export async function fetchAgents(): Promise<AgentsResponse> {
   return requestJson<AgentsResponse>("/api/agents");
+}
+
+export async function fetchRuns(): Promise<RunListResponse> {
+  return requestJson<RunListResponse>("/api/runs");
+}
+
+export async function fetchRunEvents(runId: string, after?: number): Promise<StoredRunEvent[]> {
+  const query = after && after > 0 ? `?after=${after}` : "";
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/events${query}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const message = typeof body.error === "string" ? body.error : `Request failed with ${response.status}`;
+    throw new Error(message);
+  }
+
+  return parseSseEvents(await response.text());
 }
 
 export async function createRun(request: CreateRunRequest): Promise<RunStatusBody> {
@@ -110,4 +134,23 @@ function parseRunEvent(data: string): RunEvent {
       details: data
     };
   }
+}
+
+function parseSseEvents(input: string): StoredRunEvent[] {
+  return input
+    .split(/\r?\n\r?\n/u)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .map((chunk) => {
+      const lines = chunk.split(/\r?\n/u);
+      const id = Number.parseInt(lines.find((line) => line.startsWith("id: "))?.slice(4) ?? "0", 10);
+      const event = lines.find((line) => line.startsWith("event: "))?.slice(7) ?? "message";
+      const dataLine = lines.find((line) => line.startsWith("data: "));
+      return {
+        id: Number.isFinite(id) ? id : 0,
+        event,
+        data: parseRunEvent(dataLine?.slice(6) ?? "{}"),
+        timestamp: Date.now()
+      };
+    });
 }
