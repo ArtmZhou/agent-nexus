@@ -106,6 +106,10 @@ describe("App", () => {
         });
       }
 
+      if (url === "/api/runs") {
+        return runsResponse([]);
+      }
+
       if (url === "/api/runs/run-1/cancel" && init?.method === "POST") {
         return jsonResponse({
           id: "run-1",
@@ -141,9 +145,10 @@ describe("App", () => {
     expect(unavailableClaude).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(unavailableClaude);
     expect(screen.getByRole("button", { name: /Agent Codex/i })).toBeInTheDocument();
-    expect(screen.queryByRole("complementary", { name: "Run inspector" })).not.toBeInTheDocument();
-    expect(screen.queryByText("AGENT_NEXUS_AGENTS_CONFIG")).not.toBeInTheDocument();
-    expect(screen.queryByText("Claude is not on PATH")).not.toBeInTheDocument();
+    const inspector = screen.getByRole("complementary", { name: "Run inspector" });
+    expect(within(inspector).getByText("No run selected")).toBeInTheDocument();
+    expect(within(inspector).getByText("AGENT_NEXUS_AGENTS_CONFIG")).toBeInTheDocument();
+    expect(within(inspector).getByText("Claude is not on PATH")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     const details = await screen.findByRole("complementary", { name: "Run details" });
@@ -183,7 +188,8 @@ describe("App", () => {
     expect(within(stream).getByText("14 tokens")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.getByText("canceled")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("canceled").length).toBeGreaterThan(0));
+    expect(screen.getByRole("button", { name: /Build the streaming console/i })).toHaveTextContent("canceled");
 
     FakeEventSource.instances[0]?.emit("end", { type: "end", status: "canceled" });
     expect(FakeEventSource.instances[0]?.close).toHaveBeenCalled();
@@ -232,6 +238,10 @@ describe("App", () => {
           errorCode: null,
           eventsLogPath: null
         });
+      }
+
+      if (url === "/api/runs") {
+        return runsResponse([]);
       }
 
       if (url === "/api/runs/run-2") {
@@ -341,6 +351,10 @@ describe("App", () => {
         });
       }
 
+      if (url === "/api/runs") {
+        return runsResponse([]);
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -394,6 +408,10 @@ describe("App", () => {
             }
           ]
         });
+      }
+
+      if (url === "/api/runs") {
+        return runsResponse([]);
       }
 
       throw new Error(`Unexpected request: ${url}`);
@@ -468,6 +486,10 @@ describe("App", () => {
         });
       }
 
+      if (url === "/api/runs") {
+        return runsResponse([]);
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -514,6 +536,10 @@ describe("App", () => {
             }
           ]
         });
+      }
+
+      if (url === "/api/runs") {
+        return runsResponse([]);
       }
 
       throw new Error(`Unexpected request: ${url}`);
@@ -601,6 +627,190 @@ describe("App", () => {
     expect(await screen.findByText("Repo summary")).toBeInTheDocument();
   });
 
+  test("does not fetch replay text for active summaries from history", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "codex",
+              baseAgentId: "codex",
+              name: "Codex",
+              available: true,
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs") {
+        return runsResponse([
+          runSummary({
+            id: "run-active",
+            status: "running",
+            prompt: "Still running"
+          })
+        ]);
+      }
+
+      if (url === "/api/runs/run-active/events") {
+        throw new Error("Active summaries should not be fetched with text replay");
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: /Still running/i })).toHaveTextContent("running");
+    expect(await screen.findByText("Waiting for streamed output.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/runs/run-active/events");
+  });
+
+  test("ignores stale replay errors after selecting another historical run", async () => {
+    let firstReplaySettled = false;
+    let rejectFirstReplay: (error: Error) => void = () => undefined;
+    const firstReplay = new Promise<Response>((_resolve, reject) => {
+      rejectFirstReplay = reject;
+    }).finally(() => {
+      firstReplaySettled = true;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "codex",
+              baseAgentId: "codex",
+              name: "Codex",
+              available: true,
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs") {
+        return runsResponse([
+          runSummary({ id: "run-a", prompt: "First history" }),
+          runSummary({ id: "run-b", prompt: "Second history", createdAt: 90, updatedAt: 120 })
+        ]);
+      }
+
+      if (url === "/api/runs/run-a/events") {
+        return firstReplay;
+      }
+
+      if (url === "/api/runs/run-b/events") {
+        return sseResponse([{ id: 1, event: "text_delta", data: { type: "text_delta", delta: "Second output" } }]);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Second history/i }));
+    expect(await screen.findByText("Second output")).toBeInTheDocument();
+
+    rejectFirstReplay(new Error("First replay failed late"));
+
+    await waitFor(() => expect(firstReplaySettled).toBe(true));
+    expect(screen.queryByText("First replay failed late")).not.toBeInTheDocument();
+    expect(screen.getByText("Second output")).toBeInTheDocument();
+  });
+
+  test("copies a historical prompt into the composer without mutating history", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "/api/agents") {
+        return jsonResponse({
+          diagnostics: [],
+          config: {
+            agentsConfigPath: "D:/agent-nexus/agents.local.json",
+            agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG"
+          },
+          agents: [
+            {
+              id: "codex",
+              baseAgentId: "codex",
+              name: "Codex",
+              available: true,
+              models: [{ id: "gpt-5", label: "GPT-5" }],
+              modelsSource: "live",
+              authStatus: "ok",
+              diagnostics: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs") {
+        return jsonResponse({
+          runs: [
+            {
+              id: "run-copy",
+              agentId: "codex",
+              status: "succeeded",
+              createdAt: 100,
+              updatedAt: 200,
+              cancelRequested: false,
+              childPid: null,
+              processGroupId: null,
+              exitCode: 0,
+              signal: null,
+              error: null,
+              errorCode: null,
+              eventsLogPath: "D:/runs/run-copy.jsonl",
+              prompt: "Reuse this prompt",
+              model: "gpt-5",
+              reasoning: null,
+              cwd: null,
+              extraAllowedDirs: []
+            }
+          ]
+        });
+      }
+
+      if (url === "/api/runs/run-copy/events") {
+        return sseResponse([{ id: 1, event: "end", data: { type: "end", status: "succeeded" } }]);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("Read-only history")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use prompt again" }));
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Reuse this prompt");
+    expect(screen.getByRole("button", { name: /Reuse this prompt/i })).toBeInTheDocument();
+  });
+
   test("opens, selects, and closes the agent menu from the keyboard", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -635,6 +845,10 @@ describe("App", () => {
         });
       }
 
+      if (url === "/api/runs") {
+        return runsResponse([]);
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -658,6 +872,34 @@ function jsonResponse(body: unknown): Response {
     status: 200,
     headers: { "content-type": "application/json" }
   });
+}
+
+function runsResponse(runs: unknown[]): Response {
+  return jsonResponse({ runs });
+}
+
+function runSummary(overrides: Partial<Record<string, unknown>>) {
+  return {
+    id: "run-history",
+    agentId: "codex",
+    status: "succeeded",
+    createdAt: 100,
+    updatedAt: 200,
+    cancelRequested: false,
+    childPid: null,
+    processGroupId: null,
+    exitCode: 0,
+    signal: null,
+    error: null,
+    errorCode: null,
+    eventsLogPath: "D:/runs/run-history.jsonl",
+    prompt: "Historical prompt",
+    model: "gpt-5",
+    reasoning: null,
+    cwd: null,
+    extraAllowedDirs: [],
+    ...overrides
+  };
 }
 
 function sseResponse(events: Array<{ id: number; event: string; data: unknown }>): Response {

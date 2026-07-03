@@ -26,6 +26,8 @@ type RunConsoleProps = {
   selectedRunEvents: RunEvent[];
   selectedRunRawEvents: StoredRunEvent[];
   selectedRun: RunStatusBody | null;
+  selectedRunSummary: RunSummary | null;
+  readOnlyHistory: boolean;
   loadingRunEvents: boolean;
   runEventsError: string | null;
   running: boolean;
@@ -39,6 +41,7 @@ type RunConsoleProps = {
   onRun: () => void;
   onCancel: () => void;
   onRunSelect: (runId: string) => void;
+  onReusePrompt: (prompt: string) => void;
   onRefresh: () => void;
   onDetailsOpenChange: (open: boolean) => void;
   onAdvancedOpenChange: (open: boolean) => void;
@@ -134,15 +137,28 @@ export function RunConsole(props: RunConsoleProps) {
         </section>
       )}
 
-      <div className="workbench-grid">
+      <div className="workbench-grid three-region">
         <HistoryRail runs={props.runSummaries} selectedRunId={props.selectedRunId} onSelect={props.onRunSelect} />
         <TranscriptPane
           currentRun={props.selectedRun}
           events={props.selectedRunEvents}
           prompt={props.selectedRunPrompt}
+          selectedRunSummary={props.selectedRunSummary}
+          readOnlyHistory={props.readOnlyHistory}
+          onReusePrompt={props.onReusePrompt}
           loading={props.loadingRunEvents}
           error={props.runEventsError}
         />
+        <div className="inspector-panel">
+          <RunInspector
+            variant="embedded"
+            run={props.selectedRun}
+            rawEvents={props.selectedRunRawEvents}
+            agents={props.agents}
+            diagnostics={props.diagnostics}
+            agentsConfig={props.agentsConfig}
+          />
+        </div>
       </div>
 
       <section className="composer" aria-label="Prompt composer">

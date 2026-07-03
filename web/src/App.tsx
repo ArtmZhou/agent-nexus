@@ -47,6 +47,7 @@ export default function App() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [submittedPrompt, setSubmittedPrompt] = useState("");
   const subscriptionRef = useRef<RunEventSubscription | null>(null);
+  const runEventsRequestRef = useRef(0);
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.id === selectedAgentId) ?? agents.find((agent) => agent.available) ?? null,
@@ -61,6 +62,12 @@ export default function App() {
   const selectedRunPrompt = selectedRunSummary?.prompt ?? submittedPrompt;
   const selectedRunEvents = selectedRunId ? eventsByRunId[selectedRunId] ?? [] : events;
   const selectedRunRawEvents = selectedRunId ? rawEventsByRunId[selectedRunId] ?? [] : rawEvents;
+  const viewingHistoricalTerminalRun = Boolean(
+    selectedRunSummary &&
+      selectedRunSummary.id !== currentRun?.id &&
+      selectedRunSummary.status !== "queued" &&
+      selectedRunSummary.status !== "running"
+  );
 
   useEffect(() => {
     void refreshAgents();
@@ -118,10 +125,12 @@ export default function App() {
     try {
       const response = await fetchRuns();
       setRunSummaries(response.runs);
-      const nextRunId = selectedRunId ?? response.runs[0]?.id ?? null;
-      setSelectedRunId(nextRunId);
-      if (nextRunId) {
-        void loadRunEvents(nextRunId);
+      const nextRun = response.runs.find((run) => run.id === selectedRunId) ?? response.runs[0] ?? null;
+      setSelectedRunId(nextRun?.id ?? null);
+      if (nextRun && shouldReplayRunEvents(nextRun)) {
+        void loadRunEvents(nextRun.id);
+      } else {
+        setLoadingRunEvents(false);
       }
     } catch (caught) {
       setRunEventsError(caught instanceof Error ? caught.message : String(caught));
@@ -129,13 +138,22 @@ export default function App() {
   }
 
   function selectRun(runId: string): void {
+    runEventsRequestRef.current += 1;
     setSelectedRunId(runId);
+    setRunEventsError(null);
+    const summary = runSummaries.find((run) => run.id === runId);
+    if (summary && !shouldReplayRunEvents(summary)) {
+      setLoadingRunEvents(false);
+      return;
+    }
     if (!rawEventsByRunId[runId]) {
       void loadRunEvents(runId);
     }
   }
 
   async function loadRunEvents(runId: string): Promise<void> {
+    const requestId = runEventsRequestRef.current + 1;
+    runEventsRequestRef.current = requestId;
     setLoadingRunEvents(true);
     setRunEventsError(null);
     try {
@@ -143,9 +161,13 @@ export default function App() {
       setRawEventsByRunId((previous) => ({ ...previous, [runId]: storedEvents }));
       setEventsByRunId((previous) => ({ ...previous, [runId]: storedEvents.map((event) => event.data) }));
     } catch (caught) {
-      setRunEventsError(caught instanceof Error ? caught.message : String(caught));
+      if (runEventsRequestRef.current === requestId) {
+        setRunEventsError(caught instanceof Error ? caught.message : String(caught));
+      }
     } finally {
-      setLoadingRunEvents(false);
+      if (runEventsRequestRef.current === requestId) {
+        setLoadingRunEvents(false);
+      }
     }
   }
 
@@ -167,6 +189,8 @@ export default function App() {
     if (!prompt.trim()) return;
 
     setError(null);
+    setRunEventsError(null);
+    runEventsRequestRef.current += 1;
     subscriptionRef.current?.close();
     setEvents([]);
     setRawEvents([]);
@@ -240,9 +264,16 @@ export default function App() {
     try {
       const canceled = await cancelRun(currentRun.id);
       setCurrentRun(canceled);
+      setRunSummaries((previous) =>
+        previous.map((item) => item.id === canceled.id ? { ...item, ...canceled } : item)
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
+  }
+
+  function reusePrompt(prompt: string): void {
+    setConsoleState((previous) => ({ ...previous, prompt }));
   }
 
   return (
@@ -267,6 +298,8 @@ export default function App() {
         selectedRunEvents={selectedRunEvents}
         selectedRunRawEvents={selectedRunRawEvents}
         selectedRun={selectedRun}
+        selectedRunSummary={selectedRunSummary}
+        readOnlyHistory={viewingHistoricalTerminalRun}
         loadingRunEvents={loadingRunEvents}
         runEventsError={runEventsError}
         running={running}
@@ -280,6 +313,7 @@ export default function App() {
         onRun={startRun}
         onCancel={stopRun}
         onRunSelect={selectRun}
+        onReusePrompt={reusePrompt}
         onRefresh={refreshAgents}
         onDetailsOpenChange={setDetailsOpen}
         onAdvancedOpenChange={setAdvancedOpen}
@@ -295,4 +329,8 @@ function agentSupportsReasoning(agent: DetectedAgent, reasoning: string): boolea
 function chooseRunnableAgent(agents: DetectedAgent[], selectedAgentId: string | null): DetectedAgent | null {
   const current = agents.find((agent) => agent.id === selectedAgentId && agent.available);
   return current ?? agents.find((agent) => agent.available) ?? null;
+}
+
+function shouldReplayRunEvents(run: RunSummary): boolean {
+  return run.status !== "queued" && run.status !== "running";
 }

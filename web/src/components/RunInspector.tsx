@@ -7,7 +7,8 @@ type RunInspectorProps = {
   agentsConfig: AgentsConfig;
   run: RunStatusBody | null;
   rawEvents: StoredRunEvent[];
-  onClose: () => void;
+  onClose?: () => void;
+  variant?: "drawer" | "embedded";
 };
 
 const localProfileExample = `{
@@ -25,19 +26,22 @@ const localProfileExample = `{
   ]
 }`;
 
-export function RunInspector({ agents, diagnostics, agentsConfig, run, rawEvents, onClose }: RunInspectorProps) {
+export function RunInspector({ agents, diagnostics, agentsConfig, run, rawEvents, onClose, variant = "drawer" }: RunInspectorProps) {
   const allDiagnostics = [...diagnostics, ...agents.flatMap((agent) => agent.diagnostics ?? [])];
+  const embedded = variant === "embedded";
 
   return (
-    <aside className="details-drawer" aria-label="Run details">
+    <aside className={embedded ? "run-inspector embedded" : "details-drawer"} aria-label={embedded ? "Run inspector" : "Run details"}>
       <div className="drawer-head">
         <div>
-          <p className="eyebrow">Details</p>
-          <h2>Run details</h2>
+          <p className="eyebrow">{embedded ? "Inspector" : "Details"}</p>
+          <h2>{embedded ? "Run inspector" : "Run details"}</h2>
         </div>
-        <button type="button" className="ghost-button" onClick={onClose}>
-          Close details
-        </button>
+        {!embedded && (
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close details
+          </button>
+        )}
       </div>
 
       {!run && <p className="muted">No run selected</p>}
