@@ -19,7 +19,8 @@ const iconByAgentId: Record<string, string> = {
 export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }: AgentPickerProps) {
   const [open, setOpen] = useState(false);
   const listboxId = useId();
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const displayAgent = selectedAgent ?? agents[0] ?? null;
 
   return (
     <div className="agent-picker">
@@ -29,8 +30,7 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
       <button
         type="button"
         className="agent-picker-button"
-        aria-label={`Agent ${selectedAgent?.name ?? "none"}`}
-        aria-haspopup="menu"
+        aria-label={`Agent ${displayAgent?.name ?? "none"}`}
         aria-expanded={open}
         aria-controls={listboxId}
         onClick={() => setOpen((value) => !value)}
@@ -46,10 +46,10 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
           }
         }}
       >
-        <AgentIcon agent={selectedAgent} />
+        <AgentIcon agent={displayAgent} />
         <span className="agent-picker-copy">
-          <strong>{selectedAgent?.name ?? "No agent"}</strong>
-          <span>{agentMeta(selectedAgent, selectedModel)}</span>
+          <strong>{displayAgent?.name ?? "No agent"}</strong>
+          <span>{agentMeta(displayAgent, selectedModel)}</span>
         </span>
       </button>
 
@@ -57,7 +57,7 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
         <div
           className="agent-picker-menu"
           id={listboxId}
-          role="menu"
+          role="group"
           aria-label="Agents"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
@@ -70,10 +70,9 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
             <button
               key={agent.id}
               type="button"
-              role="menuitemradio"
-              aria-checked={agent.id === selectedAgent?.id}
+              aria-pressed={agent.id === selectedAgentId}
               aria-disabled={!agent.available}
-              className={`agent-picker-option ${agent.id === selectedAgent?.id ? "selected" : ""}`}
+              className={`agent-picker-option ${agent.id === selectedAgentId ? "selected" : ""}`}
               onClick={() => selectAgent(agent)}
               onKeyDown={(event) => {
                 if (event.key !== "Enter" && event.key !== " ") return;

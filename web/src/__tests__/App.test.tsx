@@ -134,8 +134,9 @@ describe("App", () => {
     expect(screen.getByRole("main", { name: "Chat workbench" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Agent Codex/i })).toHaveTextContent("CX");
     fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
-    expect(await screen.findByRole("menuitemradio", { name: /Codex/i })).toHaveTextContent("CX");
-    const unavailableClaude = screen.getByRole("menuitemradio", { name: /Claude/i });
+    const agentChoices = await screen.findByRole("group", { name: "Agents" });
+    expect(within(agentChoices).getByRole("button", { name: /Codex/i })).toHaveTextContent("CX");
+    const unavailableClaude = within(agentChoices).getByRole("button", { name: /Claude/i });
     expect(unavailableClaude).toHaveTextContent("CL");
     expect(unavailableClaude).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(unavailableClaude);
@@ -350,7 +351,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     fireEvent.change(screen.getByLabelText("Reasoning"), { target: { value: "high" } });
     fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Claude/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Claude/i }));
 
     await waitFor(() => expect(screen.queryByLabelText("Reasoning")).not.toBeInTheDocument());
 
@@ -403,8 +404,8 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: /Agent Work Codex/i })).toHaveTextContent("CX");
     fireEvent.click(screen.getByRole("button", { name: /Agent Work Codex/i }));
-    expect(await screen.findByRole("menuitemradio", { name: /Custom Agent/i })).toHaveTextContent("AG");
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Custom Agent/i }));
+    expect(await screen.findByRole("button", { name: /Custom Agent/i })).toHaveTextContent("AG");
+    fireEvent.click(screen.getByRole("button", { name: /Custom Agent/i }));
     expect(screen.getByRole("button", { name: /Agent Custom Agent/i })).toHaveTextContent("AG");
   });
 
@@ -475,7 +476,8 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: /Agent Codex/i })).toHaveTextContent("CX");
     fireEvent.click(screen.getByRole("button", { name: /Agent Codex/i }));
-    expect(screen.getByRole("menuitemradio", { name: /Claude/i })).toHaveAttribute("aria-checked", "false");
+    const agentChoices = await screen.findByRole("group", { name: "Agents" });
+    expect(within(agentChoices).getByRole("button", { name: /Claude/i })).toHaveAttribute("aria-pressed", "false");
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Use the available agent" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
@@ -521,6 +523,9 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("button", { name: /Agent Claude/i })).toHaveTextContent("CL");
+    fireEvent.click(screen.getByRole("button", { name: /Agent Claude/i }));
+    const agentChoices = await screen.findByRole("group", { name: "Agents" });
+    expect(within(agentChoices).getByRole("button", { name: /Claude/i })).toHaveAttribute("aria-pressed", "false");
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Cannot run this" } });
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
@@ -567,12 +572,12 @@ describe("App", () => {
 
     const trigger = await screen.findByRole("button", { name: /Agent Codex/i });
     fireEvent.keyDown(trigger, { key: "Enter" });
-    expect(await screen.findByRole("menu", { name: "Agents" })).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("menu", { name: "Agents" })).not.toBeInTheDocument());
+    expect(await screen.findByRole("group", { name: "Agents" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("group", { name: "Agents" }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Agents" })).not.toBeInTheDocument());
 
     fireEvent.keyDown(trigger, { key: "Enter" });
-    fireEvent.keyDown(await screen.findByRole("menuitemradio", { name: /Gemini/i }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("button", { name: /Gemini/i }), { key: "Enter" });
     expect(screen.getByRole("button", { name: /Agent Gemini/i })).toHaveTextContent("GM");
   });
 });
