@@ -18,6 +18,7 @@ export type StartAgentRunOptions = {
   cwd?: string | null;
   model?: string | null;
   reasoning?: string | null;
+  resumeSessionId?: string | null;
   resolvedPath?: string | null;
   env?: Record<string, string | undefined>;
 };
@@ -39,6 +40,7 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
   let acpSession: AttachedAcpSession | null = null;
   let cancelRequested = false;
   let completedCleanly = false;
+  let parserTerminalStatus: Extract<RunEvent, { type: "end" }>["status"] | null = null;
   let streamError: Extract<RunEvent, { type: "error" }> | null = null;
   let terminalPromiseResolve: (body: RunStatusBody) => void = () => undefined;
   const done = new Promise<RunStatusBody>((resolve) => {
@@ -59,7 +61,8 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
       options: {
         model: options.model ?? options.request.model ?? null,
         reasoning: options.reasoning ?? options.request.reasoning ?? null
-      }
+      },
+      resumeSessionId: options.resumeSessionId ?? options.request.resumeSessionId ?? null
     });
 
     const command = prepareAgentCommand(launch.executablePath, args, process.platform, launch.env);
@@ -80,6 +83,7 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
 
     const emit = (event: RunEvent) => {
       if (event.type === "end") {
+        parserTerminalStatus = event.status;
         completedCleanly = event.status === "succeeded";
         return;
       }
@@ -92,7 +96,8 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
     const parser = attachParser(options.def, child, emit, {
       cwd,
       prompt,
-      model: options.model ?? options.request.model ?? null
+      model: options.model ?? options.request.model ?? null,
+      resumeSessionId: options.resumeSessionId ?? options.request.resumeSessionId ?? null
     });
     if (parser) {
       child.stdout.on("data", (chunk: string | Uint8Array) => parser.write(chunk));
@@ -155,7 +160,8 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
       acpCleanCompletion: acpSession?.completedSuccessfully() ?? false,
       artifactQuietShutdownRequested: false,
       artifactProducedThisRun: false,
-      turnCompletedCleanly: completedCleanly
+      turnCompletedCleanly: completedCleanly,
+      parserTerminalStatus
     });
 
     if (status === "succeeded") {
@@ -197,7 +203,7 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
     def: RuntimeAgentDef,
     spawned: ChildProcessWithoutNullStreams,
     emit: (event: RunEvent) => void,
-    context: { cwd: string; prompt: string; model?: string | null }
+    context: { cwd: string; prompt: string; model?: string | null; resumeSessionId?: string | null }
   ): StreamChunkParser | null {
     switch (def.streamFormat) {
       case "json-event-stream":
@@ -214,6 +220,7 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
           cwd: context.cwd,
           prompt: context.prompt,
           model: context.model,
+          resumeSessionId: context.resumeSessionId,
           emit
         });
         acpSession.start().catch((error: unknown) => {

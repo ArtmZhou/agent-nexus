@@ -17,6 +17,7 @@ export const opencodeDef: RuntimeAgentDef = {
   },
   buildArgs: (context) => {
     const args = ["run", "--format", "json"];
+    if (context.resumeSessionId) args.push("-s", context.resumeSessionId);
     if (context.options?.model) args.push("--model", context.options.model);
     if (context.cwd) args.push("--dir", context.cwd);
     args.push(context.prompt);
@@ -26,5 +27,6 @@ export const opencodeDef: RuntimeAgentDef = {
   promptInputFormat: "text",
   streamFormat: "json-event-stream",
   eventParser: "opencode",
+  resumesSessionViaCli: true,
   capturesSessionIdFromStream: true,
 };

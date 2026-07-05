@@ -7,9 +7,7 @@ export const claudeDef: RuntimeAgentDef = {
   bin: "claude",
   versionArgs: ["--version"],
   fallbackModels: [
-    modelOption("sonnet", "Sonnet"),
-    modelOption("opus", "Opus"),
-    modelOption("haiku", "Haiku"),
+    modelOption("", "Default"),
   ],
   listModels: {
     args: ["models"],

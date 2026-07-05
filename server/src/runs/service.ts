@@ -5,8 +5,10 @@ import type {
   RunEvent,
   RunStatus,
   RunStatusBody,
+  RunSummary,
   StoredRunEvent
 } from "@agent-nexus/shared";
+import { readRunEventsFromLog, readRunIndexSync, writeRunIndex } from "./persistence.js";
 
 export type RunServiceOptions = {
   runsLogDir?: string;
@@ -17,6 +19,12 @@ export type RunServiceOptions = {
 export type RunListFilter = {
   active?: boolean;
   status?: RunStatus | RunStatus[];
+};
+
+export type FindLatestSessionOptions = {
+  agentId: string;
+  cwd?: string | null;
+  excludeRunId?: string | null;
 };
 
 export type FinishRunOptions = {
@@ -60,6 +68,10 @@ export function createRunService(options: RunServiceOptions = {}) {
   const now = options.now ?? Date.now;
   const idGenerator = options.idGenerator ?? createDefaultIdGenerator();
   const runs = new Map<string, RunRecord>();
+  const summaries = new Map<string, RunSummary>(
+    (options.runsLogDir ? readRunIndexSync(options.runsLogDir) : []).map((summary) => [summary.id, cloneSummary(summary)])
+  );
+  let summaryWriteQueue: Promise<void> = Promise.resolve();
 
   function create(request: CreateRunRequest): RunStatusBody {
     const id = idGenerator();
@@ -69,6 +81,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     const body: RunStatusBody = {
       id,
       agentId: request.agentId,
+      sessionId: request.resumeSessionId ?? null,
       status: "queued",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -89,6 +102,7 @@ export function createRunService(options: RunServiceOptions = {}) {
       listeners: new Set(),
       waiters: new Set()
     });
+    void upsertSummary(runs.get(id)!);
 
     return cloneBody(body);
   }
@@ -116,6 +130,25 @@ export function createRunService(options: RunServiceOptions = {}) {
       .map((record) => cloneBody(record.body));
   }
 
+  function listSummaries(filter: RunListFilter = {}): RunSummary[] {
+    const statuses = normalizeStatuses(filter.status);
+
+    return Array.from(summaries.values())
+      .filter((summary) => {
+        if (filter.active === true && !activeStatuses.has(summary.status)) {
+          return false;
+        }
+
+        if (filter.active === false && activeStatuses.has(summary.status)) {
+          return false;
+        }
+
+        return statuses ? statuses.has(summary.status) : true;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(cloneSummary);
+  }
+
   async function emit(id: string, data: RunEvent): Promise<StoredRunEvent> {
     const record = requireRun(id);
     const event: StoredRunEvent = {
@@ -127,6 +160,10 @@ export function createRunService(options: RunServiceOptions = {}) {
 
     record.events.push(event);
     record.body.updatedAt = event.timestamp;
+    if (data.type === "status" && data.sessionId) {
+      record.body.sessionId = data.sessionId;
+    }
+    await upsertSummary(record);
     await persistEvent(record, event);
 
     for (const listener of record.listeners) {
@@ -143,8 +180,42 @@ export function createRunService(options: RunServiceOptions = {}) {
       .map((event) => cloneEvent(event));
   }
 
+  async function eventsAfterAsync(id: string, afterEventId = 0): Promise<StoredRunEvent[]> {
+    const record = runs.get(id);
+    if (record) {
+      return eventsAfter(id, afterEventId);
+    }
+
+    const summary = summaries.get(id);
+    if (!summary?.eventsLogPath) {
+      return [];
+    }
+
+    return readRunEventsFromLog(summary.eventsLogPath, afterEventId);
+  }
+
   function statusBody(id: string): RunStatusBody | null {
-    return get(id);
+    return get(id) ?? cloneBodyFromSummary(summaries.get(id));
+  }
+
+  function hasInMemoryRun(id: string): boolean {
+    return runs.has(id);
+  }
+
+  function findLatestSessionId(filter: FindLatestSessionOptions): string | null {
+    const cwd = normalizeCwd(filter.cwd);
+    const latest = listSummaries()
+      .filter((summary) =>
+        summary.id !== filter.excludeRunId &&
+        summary.agentId === filter.agentId &&
+        summary.status === "succeeded" &&
+        normalizeCwd(summary.cwd) === cwd &&
+        typeof summary.sessionId === "string" &&
+        summary.sessionId.trim().length > 0
+      )
+      .at(0);
+
+    return latest?.sessionId ?? null;
   }
 
   function start(id: string, startOptions: StartRunOptions = {}): RunStatusBody {
@@ -158,6 +229,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     record.body.updatedAt = now();
     record.body.childPid = startOptions.childPid ?? record.body.childPid;
     record.body.processGroupId = startOptions.processGroupId ?? record.body.processGroupId;
+    void upsertSummary(record);
     return cloneBody(record.body);
   }
 
@@ -257,6 +329,7 @@ export function createRunService(options: RunServiceOptions = {}) {
     }
 
     await emit(id, { type: "end", status });
+    await upsertSummary(record);
     resolveWaiters(record);
     return cloneBody(record.body);
   }
@@ -280,13 +353,41 @@ export function createRunService(options: RunServiceOptions = {}) {
     await appendFile(record.body.eventsLogPath, `${JSON.stringify(event)}\n`, "utf8");
   }
 
+  async function upsertSummary(record: RunRecord): Promise<void> {
+    summaries.set(record.body.id, {
+      ...cloneBody(record.body),
+      prompt: record.request.prompt,
+      model: record.request.model ?? null,
+      reasoning: record.request.reasoning ?? null,
+      cwd: record.request.cwd ?? null,
+      extraAllowedDirs: record.request.extraAllowedDirs ? [...record.request.extraAllowedDirs] : []
+    });
+    await persistSummaries();
+  }
+
+  function persistSummaries(): Promise<void> {
+    if (!options.runsLogDir) return Promise.resolve();
+
+    summaryWriteQueue = summaryWriteQueue
+      .catch(() => undefined)
+      .then(() => writeRunIndex(options.runsLogDir!, listSummaries()))
+      .catch((error: unknown) => {
+        console.error("Unable to persist run history index", error);
+      });
+    return summaryWriteQueue;
+  }
+
   return {
     create,
     get,
     list,
+    listSummaries,
     emit,
     eventsAfter,
+    eventsAfterAsync,
     statusBody,
+    hasInMemoryRun,
+    findLatestSessionId,
     start,
     finish,
     fail,
@@ -323,6 +424,29 @@ function cloneBody(body: RunStatusBody): RunStatusBody {
   return { ...body };
 }
 
+function cloneBodyFromSummary(summary: RunSummary | undefined): RunStatusBody | null {
+  if (!summary) return null;
+
+  const {
+    prompt: _prompt,
+    model: _model,
+    reasoning: _reasoning,
+    cwd: _cwd,
+    extraAllowedDirs: _extraAllowedDirs,
+    ...body
+  } = summary;
+
+  return cloneBody(body);
+}
+
+function cloneSummary(summary: RunSummary): RunSummary {
+  return {
+    ...summary,
+    sessionId: summary.sessionId ?? null,
+    extraAllowedDirs: summary.extraAllowedDirs ? [...summary.extraAllowedDirs] : []
+  };
+}
+
 function cloneEvent(event: StoredRunEvent): StoredRunEvent {
   return {
     ...event,
@@ -335,4 +459,21 @@ function cloneRequest(request: CreateRunRequest): CreateRunRequest {
     ...request,
     extraAllowedDirs: request.extraAllowedDirs ? [...request.extraAllowedDirs] : undefined
   };
+}
+
+function normalizeCwd(cwd: string | null | undefined): string {
+  const trimmed = (cwd ?? "").trim();
+  if (!trimmed) return "";
+
+  const slashed = trimmed.replace(/\\/gu, "/");
+  const isUnc = slashed.startsWith("//") && !slashed.startsWith("///");
+  let normalized = slashed.replace(/\/+/gu, "/");
+  if (isUnc) {
+    normalized = `/${normalized}`;
+  }
+  while (normalized.length > 3 && normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  return /^[a-z]:/iu.test(normalized) || normalized.startsWith("//") ? normalized.toLowerCase() : normalized;
 }

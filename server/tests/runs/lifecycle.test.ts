@@ -122,9 +122,25 @@ describe("classifyRunCloseStatus", () => {
         acpCleanCompletion: false,
         artifactQuietShutdownRequested: false,
         artifactProducedThisRun: false,
-        turnCompletedCleanly: false
+        turnCompletedCleanly: false,
+        parserTerminalStatus: null
       })
     ).toBe("succeeded");
+  });
+
+  it("lets a parser-reported terminal failure override a clean process exit", () => {
+    expect(
+      classifyRunCloseStatus({
+        cancelRequested: false,
+        code: 0,
+        signal: null,
+        acpCleanCompletion: false,
+        artifactQuietShutdownRequested: false,
+        artifactProducedThisRun: false,
+        turnCompletedCleanly: false,
+        parserTerminalStatus: "failed"
+      })
+    ).toBe("failed");
   });
 
   it("treats ACP clean completion followed by SIGTERM as success", () => {

@@ -29,6 +29,7 @@ export type RuntimeAuthProbe = {
 
 export type RuntimeAgentDef = {
   id: string;
+  baseAgentId?: string;
   name: string;
   bin: string;
   fallbackBins?: string[];

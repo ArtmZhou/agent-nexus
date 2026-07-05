@@ -1,13 +1,15 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { CreateRunRequest, RunEvent } from "@agent-nexus/shared";
+import * as persistence from "../../src/runs/persistence.js";
 import { createRunService } from "../../src/runs/service.js";
 
 const createdDirs: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(createdDirs.map((dir) => rm(dir, { recursive: true, force: true })));
   createdDirs.length = 0;
 });
@@ -43,6 +45,7 @@ describe("createRunService", () => {
     expect(created).toMatchObject({
       id: "run_1",
       agentId: "codex",
+      sessionId: null,
       status: "queued",
       createdAt: 1000,
       updatedAt: 1000,
@@ -192,4 +195,378 @@ describe("createRunService", () => {
     });
     expect(service.list({ active: true })).toEqual([]);
   });
+
+  test("persists run summaries and restores them in a new service instance", async () => {
+    const runsLogDir = await tempDir();
+    let now = 100;
+    const firstService = createRunService({
+      idGenerator: () => "run_persisted",
+      now: () => now,
+      runsLogDir
+    });
+
+    const created = firstService.create(request({
+      prompt: "remember this run",
+      model: "gpt-5",
+      reasoning: "high",
+      cwd: "D:/work",
+      extraAllowedDirs: ["D:/shared"]
+    }));
+    now = 110;
+    firstService.start(created.id, { childPid: 123, processGroupId: 123 });
+    now = 120;
+    await firstService.finish(created.id, { exitCode: 0 });
+
+    const restoredService = createRunService({
+      now: () => 200,
+      runsLogDir
+    });
+
+    expect(restoredService.listSummaries()).toEqual([
+      expect.objectContaining({
+        id: "run_persisted",
+        agentId: "codex",
+        status: "succeeded",
+        prompt: "remember this run",
+        model: "gpt-5",
+        reasoning: "high",
+        cwd: "D:/work",
+        extraAllowedDirs: ["D:/shared"],
+        childPid: 123,
+        processGroupId: 123,
+        exitCode: 0,
+        eventsLogPath: join(runsLogDir, "run_persisted.jsonl")
+      })
+    ]);
+  });
+
+  test("ignores malformed run index files instead of crashing", async () => {
+    const runsLogDir = await tempDir();
+    await mkdir(runsLogDir, { recursive: true });
+    await writeFile(join(runsLogDir, "index.json"), "{not-json", "utf8");
+
+    const service = createRunService({ runsLogDir });
+
+    expect(service.listSummaries()).toEqual([]);
+  });
+
+  test("skips invalid records when restoring a mixed run index", async () => {
+    const runsLogDir = await tempDir();
+    await mkdir(runsLogDir, { recursive: true });
+    await writeFile(join(runsLogDir, "index.json"), JSON.stringify({
+      runs: [
+        {
+          id: "run_valid",
+          agentId: "codex",
+          status: "succeeded",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: join(runsLogDir, "run_valid.jsonl"),
+          prompt: "valid",
+          model: null,
+          reasoning: "high",
+          cwd: "D:/work",
+          extraAllowedDirs: ["D:/shared"]
+        },
+        {
+          id: "run_bad_status",
+          agentId: "codex",
+          status: "finished",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null,
+          prompt: "invalid status"
+        },
+        {
+          id: "run_bad_pid",
+          agentId: "codex",
+          status: "succeeded",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: "123",
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null,
+          prompt: "invalid pid"
+        },
+        {
+          id: "run_bad_dirs",
+          agentId: "codex",
+          status: "succeeded",
+          createdAt: 100,
+          updatedAt: 110,
+          cancelRequested: false,
+          childPid: null,
+          processGroupId: null,
+          exitCode: 0,
+          signal: null,
+          error: null,
+          errorCode: null,
+          eventsLogPath: null,
+          prompt: "invalid dirs",
+          extraAllowedDirs: [123]
+        }
+      ]
+    }), "utf8");
+
+    const service = createRunService({ runsLogDir });
+
+    expect(service.listSummaries()).toEqual([
+      expect.objectContaining({
+        id: "run_valid",
+        status: "succeeded",
+        prompt: "valid",
+        childPid: null,
+        extraAllowedDirs: ["D:/shared"]
+      })
+    ]);
+  });
+
+  test("run lifecycle methods do not reject when run index writes fail", async () => {
+    const runsLogDir = await tempDir();
+    const service = createRunService({
+      idGenerator: () => "run_write_failure",
+      runsLogDir
+    });
+    const run = service.create(request());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(persistence, "writeRunIndex").mockRejectedValue(new Error("index unavailable"));
+
+    await expect(service.finish(run.id)).resolves.toMatchObject({
+      id: run.id,
+      status: "succeeded"
+    });
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Unable to persist run history index",
+        expect.any(Error)
+      );
+    });
+  });
+
+  test("updates persisted summary timestamps when non-status events stream", async () => {
+    const runsLogDir = await tempDir();
+    let now = 100;
+    const service = createRunService({
+      idGenerator: () => "run_summary_freshness",
+      now: () => now,
+      runsLogDir
+    });
+    const run = service.create(request());
+
+    now = 250;
+    await service.emit(run.id, { type: "text_delta", delta: "still working" });
+
+    expect(service.listSummaries()[0]).toMatchObject({
+      id: run.id,
+      updatedAt: 250
+    });
+  });
+
+  test("restores historical events from a persisted JSONL log", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_replay",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "replay me" }));
+    await firstService.emit(run.id, { type: "text_delta", delta: "saved output" });
+    await firstService.finish(run.id);
+
+    const restoredService = createRunService({ runsLogDir });
+
+    expect(await restoredService.eventsAfterAsync(run.id, 0)).toEqual([
+      expect.objectContaining({ id: 1, event: "text_delta", data: { type: "text_delta", delta: "saved output" } }),
+      expect.objectContaining({ id: 2, event: "end", data: { type: "end", status: "succeeded" } })
+    ]);
+  });
+
+  test("captures the latest durable session id for future turns in the same workspace", async () => {
+    let nextId = 1;
+    const service = createRunService({
+      idGenerator: () => `run_session_${nextId++}`,
+      now: incrementingClock()
+    });
+
+    const first = service.create(request({ agentId: "claude", cwd: "D:/repo" }));
+    await service.emit(first.id, { type: "status", label: "init", sessionId: "claude-session-1" });
+    await service.finish(first.id);
+    const second = service.create(request({ agentId: "claude", cwd: "D:/repo" }));
+
+    expect(service.statusBody(first.id)?.sessionId).toBe("claude-session-1");
+    expect(service.listSummaries()[1]).toMatchObject({
+      id: first.id,
+      sessionId: "claude-session-1"
+    });
+    expect(service.findLatestSessionId({
+      agentId: "claude",
+      cwd: "D:/repo",
+      excludeRunId: second.id
+    })).toBe("claude-session-1");
+  });
+
+  test("matches durable sessions across equivalent Windows working paths", async () => {
+    let nextId = 1;
+    const service = createRunService({
+      idGenerator: () => `run_path_${nextId++}`,
+      now: incrementingClock()
+    });
+
+    const first = service.create(request({ agentId: "codex", cwd: "D:\\Repo\\Project\\" }));
+    await service.emit(first.id, { type: "status", label: "thread.started", sessionId: "thread-1" });
+    await service.finish(first.id);
+
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "d:/repo/project"
+    })).toBe("thread-1");
+  });
+
+  test("filters restored historical events after a cursor", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_replay_cursor",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "replay after cursor" }));
+    await firstService.emit(run.id, { type: "text_delta", delta: "first" });
+    await firstService.emit(run.id, { type: "text_delta", delta: "second" });
+    await firstService.finish(run.id);
+
+    const restoredService = createRunService({ runsLogDir });
+
+    expect((await restoredService.eventsAfterAsync(run.id, 1)).map((event) => event.id)).toEqual([2, 3]);
+  });
+
+  test("returns a clear error event for missing restored event logs", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_missing_log",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "missing log" }));
+    await firstService.finish(run.id);
+    await rm(join(runsLogDir, "run_missing_log.jsonl"), { force: true });
+
+    const restoredService = createRunService({ runsLogDir });
+
+    await expect(restoredService.eventsAfterAsync(run.id, 0)).resolves.toEqual([
+      expect.objectContaining({
+        id: 1,
+        event: "error",
+        data: expect.objectContaining({
+          type: "error",
+          message: "Unable to replay stored run events",
+          code: "run.events_replay_failed"
+        })
+      })
+    ]);
+  });
+
+  test("keeps valid restored events around malformed JSONL lines", async () => {
+    const runsLogDir = await tempDir();
+    const firstService = createRunService({
+      idGenerator: () => "run_malformed_log",
+      now: incrementingClock(),
+      runsLogDir
+    });
+    const run = firstService.create(request({ prompt: "malformed log" }));
+    await firstService.emit(run.id, { type: "text_delta", delta: "before corruption" });
+    await firstService.emit(run.id, { type: "text_delta", delta: "after corruption" });
+    await writeFile(join(runsLogDir, "run_malformed_log.jsonl"), [
+      JSON.stringify(firstService.eventsAfter(run.id, 0)[0]),
+      "{\"id\":2",
+      JSON.stringify(firstService.eventsAfter(run.id, 0)[1]),
+      ""
+    ].join("\n"), "utf8");
+
+    const restoredService = createRunService({ runsLogDir });
+
+    await expect(restoredService.eventsAfterAsync(run.id, 0)).resolves.toEqual([
+      expect.objectContaining({
+        id: 1,
+        event: "text_delta",
+        data: { type: "text_delta", delta: "before corruption" }
+      }),
+      expect.objectContaining({
+        id: 2,
+        event: "text_delta",
+        data: { type: "text_delta", delta: "after corruption" }
+      }),
+      expect.objectContaining({
+        id: 3,
+        event: "error",
+        data: expect.objectContaining({
+          type: "error",
+          message: "Unable to replay stored run events",
+          code: "run.events_replay_failed"
+        })
+      })
+    ]);
+  });
+
+  test("keeps UNC working paths distinct from ordinary absolute paths", async () => {
+    const service = createRunService({
+      idGenerator: () => "run_unc",
+      now: incrementingClock()
+    });
+    const run = service.create(request({ agentId: "codex", cwd: "\\\\server\\share\\repo" }));
+    await service.emit(run.id, { type: "status", label: "thread.started", sessionId: "unc-session" });
+    await service.finish(run.id);
+
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "//server/share/repo/"
+    })).toBe("unc-session");
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "/server/share/repo"
+    })).toBeNull();
+  });
+
+  test("does not reuse session ids from failed or canceled runs", async () => {
+    let nextId = 1;
+    const service = createRunService({
+      idGenerator: () => `run_reuse_status_${nextId++}`,
+      now: incrementingClock()
+    });
+    const failed = service.create(request({ agentId: "codex", cwd: "D:/repo" }));
+    await service.emit(failed.id, { type: "status", label: "thread.started", sessionId: "failed-session" });
+    await service.fail(failed.id, { message: "failed" });
+
+    const canceled = service.create(request({ agentId: "codex", cwd: "D:/repo" }));
+    await service.emit(canceled.id, { type: "status", label: "thread.started", sessionId: "canceled-session" });
+    await service.cancel(canceled.id);
+
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "D:/repo"
+    })).toBeNull();
+  });
 });
+
+function incrementingClock(): () => number {
+  let time = 1_000;
+  return () => time++;
+}

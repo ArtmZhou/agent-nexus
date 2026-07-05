@@ -26,6 +26,7 @@ export type RunCloseClassificationInput = {
   artifactQuietShutdownRequested: boolean;
   artifactProducedThisRun: boolean;
   turnCompletedCleanly: boolean;
+  parserTerminalStatus?: TerminalRunStatus | null;
 };
 
 export type TerminalRunStatus = Exclude<RunStatus, "queued" | "running">;
@@ -69,6 +70,10 @@ export function classifyRunCloseStatus(input: RunCloseClassificationInput): Term
     return "canceled";
   }
 
+  if (input.parserTerminalStatus === "failed" || input.parserTerminalStatus === "canceled") {
+    return input.parserTerminalStatus;
+  }
+
   if (input.code === 0) {
     return "succeeded";
   }
@@ -86,6 +91,10 @@ export function classifyRunCloseStatus(input: RunCloseClassificationInput): Term
   }
 
   if (input.turnCompletedCleanly) {
+    return "succeeded";
+  }
+
+  if (input.parserTerminalStatus === "succeeded") {
     return "succeeded";
   }
 

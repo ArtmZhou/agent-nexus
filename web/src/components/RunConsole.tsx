@@ -1,6 +1,9 @@
-import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
-import { MessageStream } from "./MessageStream.js";
+import type { AgentDiagnostic, DetectedAgent, RunEvent, RunStatusBody, RunSummary, StoredRunEvent } from "@agent-nexus/shared";
+import type { AgentsConfig } from "../api.js";
+import { AgentPicker } from "./AgentPicker.js";
+import { HistoryRail } from "./HistoryRail.js";
 import { RunInspector } from "./RunInspector.js";
+import { TranscriptPane } from "./TranscriptPane.js";
 
 export type ConsoleState = {
   prompt: string;
@@ -12,12 +15,21 @@ export type ConsoleState = {
 type RunConsoleProps = {
   agents: DetectedAgent[];
   diagnostics: AgentDiagnostic[];
+  agentsConfig: AgentsConfig;
   selectedAgentId: string | null;
   selectedModel: string;
   state: ConsoleState;
   currentRun: RunStatusBody | null;
-  events: RunEvent[];
-  rawEvents: StoredRunEvent[];
+  runSummaries: RunSummary[];
+  selectedRunId: string | null;
+  selectedRunPrompt: string;
+  selectedRunEvents: RunEvent[];
+  selectedRunRawEvents: StoredRunEvent[];
+  selectedRun: RunStatusBody | null;
+  selectedRunSummary: RunSummary | null;
+  readOnlyHistory: boolean;
+  loadingRunEvents: boolean;
+  runEventsError: string | null;
   running: boolean;
   loadingAgents: boolean;
   detailsOpen: boolean;
@@ -28,6 +40,8 @@ type RunConsoleProps = {
   onStateChange: (state: ConsoleState) => void;
   onRun: () => void;
   onCancel: () => void;
+  onRunSelect: (runId: string) => void;
+  onReusePrompt: (prompt: string) => void;
   onRefresh: () => void;
   onDetailsOpenChange: (open: boolean) => void;
   onAdvancedOpenChange: (open: boolean) => void;
@@ -35,6 +49,9 @@ type RunConsoleProps = {
 
 export function RunConsole(props: RunConsoleProps) {
   const selectedAgent = props.agents.find((agent) => agent.id === props.selectedAgentId) ?? props.agents[0] ?? null;
+  const canRunSelectedAgent = selectedAgent?.available === true && selectedAgent.id === props.selectedAgentId;
+  const reasoningOptions = selectedAgent?.reasoningOptions ?? [];
+  const selectedReasoningValid = reasoningOptions.some((option) => option.id === props.state.reasoning);
 
   return (
     <main className="chat-workbench" aria-label="Chat workbench">
@@ -45,16 +62,12 @@ export function RunConsole(props: RunConsoleProps) {
         </div>
 
         <div className="top-controls">
-          <label>
-            Agent
-            <select value={props.selectedAgentId ?? ""} onChange={(event) => props.onAgentChange(event.target.value)}>
-              {props.agents.map((agent) => (
-                <option key={agent.id} value={agent.id} disabled={!agent.available}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <AgentPicker
+            agents={props.agents}
+            selectedAgentId={props.selectedAgentId}
+            selectedModel={props.selectedModel}
+            onSelect={props.onAgentChange}
+          />
 
           <label>
             Model
@@ -85,23 +98,23 @@ export function RunConsole(props: RunConsoleProps) {
 
       {props.advancedOpen && (
         <section className="advanced-panel" aria-label="Advanced run options">
-          <label>
-            Reasoning
-            <input
-              value={props.state.reasoning}
-              onChange={(event) => props.onStateChange({ ...props.state, reasoning: event.target.value })}
-              aria-label="Reasoning"
-            />
-          </label>
-
-          <label>
-            Working directory
-            <input
-              value={props.state.cwd}
-              onChange={(event) => props.onStateChange({ ...props.state, cwd: event.target.value })}
-              aria-label="Working directory"
-            />
-          </label>
+          {reasoningOptions.length > 0 && (
+            <label>
+              Reasoning
+              <select
+                value={selectedReasoningValid ? props.state.reasoning : ""}
+                onChange={(event) => props.onStateChange({ ...props.state, reasoning: event.target.value })}
+                aria-label="Reasoning"
+              >
+                <option value="">Default</option>
+                {reasoningOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <label>
             Extra allowed dirs
@@ -115,15 +128,45 @@ export function RunConsole(props: RunConsoleProps) {
         </section>
       )}
 
-      <MessageStream currentRun={props.currentRun} events={props.events} prompt={props.submittedPrompt} />
+      <div className="workbench-grid three-region">
+        <HistoryRail runs={props.runSummaries} selectedRunId={props.selectedRunId} onSelect={props.onRunSelect} />
+        <TranscriptPane
+          currentRun={props.selectedRun}
+          events={props.selectedRunEvents}
+          prompt={props.selectedRunPrompt}
+          selectedRunSummary={props.selectedRunSummary}
+          readOnlyHistory={props.readOnlyHistory}
+          onReusePrompt={props.onReusePrompt}
+          loading={props.loadingRunEvents}
+          error={props.runEventsError}
+        />
+        <div className="inspector-panel">
+          <RunInspector
+            variant="embedded"
+            run={props.selectedRun}
+            agentsConfig={props.agentsConfig}
+          />
+        </div>
+      </div>
 
       <section className="composer" aria-label="Prompt composer">
-        <label>
-          Prompt
+        <div className="composer-path-row">
+          <label>
+            Working path
+            <input
+              value={props.state.cwd}
+              onChange={(event) => props.onStateChange({ ...props.state, cwd: event.target.value })}
+              aria-label="Working path"
+              placeholder="Use server default"
+            />
+          </label>
+        </div>
+        <label className="composer-message-label">
           <textarea
             value={props.state.prompt}
             onChange={(event) => props.onStateChange({ ...props.state, prompt: event.target.value })}
-            aria-label="Prompt"
+            aria-label="Message"
+            placeholder="Ask the selected agent..."
             rows={4}
           />
         </label>
@@ -133,7 +176,7 @@ export function RunConsole(props: RunConsoleProps) {
             className="primary-button"
             type="button"
             onClick={props.onRun}
-            disabled={props.running || !props.state.prompt.trim() || !props.selectedAgentId}
+            disabled={props.running || !props.state.prompt.trim() || !canRunSelectedAgent}
           >
             Run
           </button>
@@ -146,10 +189,8 @@ export function RunConsole(props: RunConsoleProps) {
 
       {props.detailsOpen && (
         <RunInspector
-          run={props.currentRun}
-          rawEvents={props.rawEvents}
-          agents={props.agents}
-          diagnostics={props.diagnostics}
+          run={props.selectedRun}
+          agentsConfig={props.agentsConfig}
           onClose={() => props.onDetailsOpenChange(false)}
         />
       )}

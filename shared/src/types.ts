@@ -12,11 +12,13 @@ export type AgentDiagnostic = {
 
 export type DetectedAgent = {
   id: string;
+  baseAgentId?: string;
   name: string;
   available: boolean;
   path?: string;
   version?: string | null;
   models: RuntimeModelOption[];
+  reasoningOptions?: RuntimeModelOption[];
   modelsSource: "live" | "fallback";
   authStatus?: "ok" | "missing" | "unknown";
   authMessage?: string;
@@ -57,6 +59,7 @@ export type StoredRunEvent = {
 export type RunStatusBody = {
   id: string;
   agentId: string;
+  sessionId: string | null;
   status: RunStatus;
   createdAt: number;
   updatedAt: number;
@@ -70,8 +73,21 @@ export type RunStatusBody = {
   eventsLogPath: string | null;
 };
 
+export type RunSummary = RunStatusBody & {
+  prompt: string;
+  model?: string | null;
+  reasoning?: string | null;
+  cwd?: string | null;
+  extraAllowedDirs?: string[];
+};
+
+export type RunListResponse = {
+  runs: RunSummary[];
+};
+
 export type CreateRunRequest = {
   agentId: string;
+  resumeSessionId?: string | null;
   model?: string | null;
   reasoning?: string | null;
   cwd?: string | null;

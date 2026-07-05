@@ -1,8 +1,22 @@
-import type { AgentDiagnostic, CreateRunRequest, DetectedAgent, RunEvent, RunStatusBody, StoredRunEvent } from "@agent-nexus/shared";
+import type {
+  AgentDiagnostic,
+  CreateRunRequest,
+  DetectedAgent,
+  RunEvent,
+  RunListResponse,
+  RunStatusBody,
+  StoredRunEvent
+} from "@agent-nexus/shared";
+
+export type AgentsConfig = {
+  agentsConfigPath: string;
+  agentsConfigEnvKey: "AGENT_NEXUS_AGENTS_CONFIG";
+};
 
 export type AgentsResponse = {
   agents: DetectedAgent[];
   diagnostics: AgentDiagnostic[];
+  config: AgentsConfig;
 };
 
 export type RunEventSubscription = {
@@ -25,6 +39,22 @@ const runEventTypes: RunEvent["type"][] = [
 
 export async function fetchAgents(): Promise<AgentsResponse> {
   return requestJson<AgentsResponse>("/api/agents");
+}
+
+export async function fetchRuns(): Promise<RunListResponse> {
+  return requestJson<RunListResponse>("/api/runs");
+}
+
+export async function fetchRunEvents(runId: string, after?: number): Promise<StoredRunEvent[]> {
+  const query = after && after > 0 ? `?after=${after}` : "";
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/events${query}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const message = typeof body.error === "string" ? body.error : `Request failed with ${response.status}`;
+    throw new Error(message);
+  }
+
+  return parseSseEvents(await response.text());
 }
 
 export async function createRun(request: CreateRunRequest): Promise<RunStatusBody> {
@@ -60,12 +90,13 @@ export function subscribeRunEvents(
       const id = Number.parseInt((message as MessageEvent).lastEventId || "0", 10);
       if (Number.isFinite(id) && id > 0) latestId = id;
 
-      const data = parseRunEvent((message as MessageEvent).data);
+      const parsed = parseStoredRunEventPayload((message as MessageEvent).data);
+      const data = parsed.data;
       onEvent({
         id: Number.isFinite(id) && id > 0 ? id : latestId,
         event: eventType,
         data,
-        timestamp: Date.now()
+        timestamp: parsed.timestamp ?? Date.now()
       });
 
       if (data.type === "end") {
@@ -75,7 +106,9 @@ export function subscribeRunEvents(
   }
 
   source.onerror = (event) => {
-    onError?.(event);
+    if (source.readyState === EventSource.CLOSED) {
+      onError?.(event);
+    }
   };
 
   return {
@@ -94,14 +127,46 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function parseRunEvent(data: string): RunEvent {
+function parseStoredRunEventPayload(data: string): { data: RunEvent; timestamp?: number } {
   try {
-    return JSON.parse(data) as RunEvent;
+    const parsed = JSON.parse(data) as RunEvent & { timestamp?: unknown };
+    return {
+      data: stripSseTimestamp(parsed),
+      timestamp: typeof parsed.timestamp === "number" && Number.isFinite(parsed.timestamp) ? parsed.timestamp : undefined
+    };
   } catch {
     return {
-      type: "error",
-      message: "Unable to parse run event",
-      details: data
+      data: {
+        type: "error",
+        message: "Unable to parse run event",
+        details: data
+      }
     };
   }
+}
+
+function stripSseTimestamp(data: RunEvent & { timestamp?: unknown }): RunEvent {
+  const { timestamp: _timestamp, ...event } = data;
+  return event as RunEvent;
+}
+
+function parseSseEvents(input: string): StoredRunEvent[] {
+  return input
+    .split(/\r?\n\r?\n/u)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .map((chunk) => {
+      const lines = chunk.split(/\r?\n/u);
+      const id = Number.parseInt(lines.find((line) => line.startsWith("id: "))?.slice(4) ?? "0", 10);
+      const event = lines.find((line) => line.startsWith("event: "))?.slice(7) ?? "message";
+      const timestamp = Number.parseInt(lines.find((line) => line.startsWith("timestamp: "))?.slice(11) ?? "", 10);
+      const dataLine = lines.find((line) => line.startsWith("data: "));
+      const parsed = parseStoredRunEventPayload(dataLine?.slice(6) ?? "{}");
+      return {
+        id: Number.isFinite(id) ? id : 0,
+        event,
+        data: parsed.data,
+        timestamp: Number.isFinite(timestamp) ? timestamp : parsed.timestamp ?? Date.now()
+      };
+    });
 }

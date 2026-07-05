@@ -34,6 +34,7 @@ function nodeAgent(
   options: {
     modelsParser?: (stdout: string) => RuntimeModelOption[] | null;
     authProbe?: string[];
+    reasoningOptions?: RuntimeModelOption[];
   } = {},
 ): RuntimeAgentDef {
   return {
@@ -47,6 +48,7 @@ function nodeAgent(
       parse: options.modelsParser ?? parseLineModels,
     },
     authProbe: options.authProbe ? { args: [scriptPath, ...options.authProbe] } : undefined,
+    reasoningOptions: options.reasoningOptions,
     buildArgs: () => [],
     streamFormat: "plain",
   };
@@ -100,6 +102,45 @@ describe("detectLocalAgents", () => {
       available: true,
       path: process.execPath,
       version: "Versioned CLI 9.8.7",
+    });
+  });
+
+  it("includes runtime reasoning options in detected agents", async () => {
+    const scriptPath = writeProbeScript("reasoning", `
+      if (process.argv[2] === "version") console.log("reasoning-agent 1.0.0");
+      if (process.argv[2] === "models") console.log("alpha");
+    `);
+
+    const [agent] = await detectLocalAgents(registry([
+      nodeAgent("reasoning", scriptPath, {
+        reasoningOptions: [{ id: "high", label: "High" }],
+      }),
+    ]), {
+      resolve: { pathDirs: [dirname(process.execPath)] },
+    });
+
+    expect(agent.reasoningOptions).toEqual([{ id: "high", label: "High" }]);
+  });
+
+  it("includes runtime base agent identity in detected agents", async () => {
+    const scriptPath = writeProbeScript("base-agent", `
+      if (process.argv[2] === "version") console.log("profile-agent 1.0.0");
+      if (process.argv[2] === "models") console.log("profile-model");
+    `);
+    const def = {
+      ...nodeAgent("work-codex", scriptPath),
+      name: "Work Codex",
+      baseAgentId: "codex",
+    };
+
+    const [agent] = await detectLocalAgents(registry([def]), {
+      resolve: { pathDirs: [dirname(process.execPath)] },
+    });
+
+    expect(agent).toMatchObject({
+      id: "work-codex",
+      name: "Work Codex",
+      baseAgentId: "codex",
     });
   });
 

@@ -19,11 +19,7 @@ describe("createAgentRegistry", () => {
   it("contains required built-in agents", () => {
     const registry = createAgentRegistry();
 
-    expect(registry.get("codex")?.name).toBe("Codex CLI");
-    expect(registry.get("claude")?.name).toBe("Claude Code");
-    expect(registry.get("opencode")?.name).toBe("OpenCode");
-    expect(registry.get("gemini")?.name).toBe("Gemini CLI");
-    expect(registry.get("cursor-agent")?.name).toBe("Cursor Agent");
+    expect(registry.list().map((agent) => agent.id)).toEqual(["codex", "claude", "opencode"]);
   });
 
   it("applies local profile inheritance, prefixed args, env, and default model", () => {
@@ -82,6 +78,11 @@ describe("listRegisteredAgents", () => {
       id: "codex",
       available: true,
       path: codexPath,
+      reasoningOptions: [
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High" },
+      ],
       modelsSource: "fallback",
     });
     expect(codex?.models.length).toBeGreaterThan(0);
@@ -91,5 +92,32 @@ describe("listRegisteredAgents", () => {
       modelsSource: "fallback",
     });
     expect(claude?.diagnostics?.[0]?.code).toBe("agent.not_on_path");
+  });
+
+  it("exposes base agent identity for local profile detected agents", () => {
+    const binDir = tempDir("profile-bin");
+    const codexPath = writeExecutable(binDir, "codex");
+    const registry = createAgentRegistry({
+      profiles: [
+        {
+          id: "codex-work",
+          name: "Work Codex",
+          baseAgent: "codex",
+        },
+      ],
+    });
+
+    const agents = listRegisteredAgents(registry, {
+      pathDirs: [binDir],
+      platform: process.platform,
+      env: { PATH: binDir },
+    });
+
+    expect(agents.find((agent) => agent.id === "codex-work")).toMatchObject({
+      id: "codex-work",
+      name: "Work Codex",
+      baseAgentId: "codex",
+      path: codexPath,
+    });
   });
 });

@@ -26,7 +26,9 @@ export function createRunsRouter(services: RunsRouterServices): Router {
     }
 
     response.json({
-      runs: status === "active" ? services.runs.list({ active: true }) : services.runs.list(status ? { status } : {})
+      runs: status === "active"
+        ? services.runs.listSummaries({ active: true })
+        : services.runs.listSummaries(status ? { status } : {})
     });
   });
 
@@ -40,7 +42,7 @@ export function createRunsRouter(services: RunsRouterServices): Router {
     }
   });
 
-  router.get("/:id/events", (request, response) => {
+  router.get("/:id/events", async (request, response) => {
     const run = services.runs.statusBody(request.params.id);
     if (!run) {
       response.status(404).json({ error: "Run not found" });
@@ -62,19 +64,30 @@ export function createRunsRouter(services: RunsRouterServices): Router {
 
     let closed = false;
     const sent = new Set<number>();
-    const unsubscribe = services.runs.subscribe(run.id, send);
+    const unsubscribe = services.runs.hasInMemoryRun(run.id)
+      ? services.runs.subscribe(run.id, send)
+      : () => undefined;
     request.on("close", close);
 
-    for (const event of services.runs.eventsAfter(run.id, afterCursor)) {
+    for (const event of await services.runs.eventsAfterAsync(run.id, afterCursor)) {
       send(event);
       if (closed) break;
+    }
+
+    if (!services.runs.hasInMemoryRun(run.id)) {
+      close();
     }
 
     function send(event: StoredRunEvent): void {
       if (closed || event.id <= afterCursor || sent.has(event.id)) return;
 
       sent.add(event.id);
-      response.write(encodeSseEvent(event.id, event.event, event.data));
+      try {
+        response.write(encodeStoredSseEvent(event));
+      } catch {
+        close();
+        return;
+      }
 
       if (isTerminalEvent(event)) {
         close();
@@ -113,12 +126,18 @@ export function createRunsRouter(services: RunsRouterServices): Router {
         return;
       }
 
-      const created = services.runs.create(parsed.request);
+      const resumeSessionId = parsed.request.resumeSessionId ?? reusableSessionId(services, def, parsed.request);
+      const requestWithSession: CreateRunRequest = {
+        ...parsed.request,
+        resumeSessionId
+      };
+      const created = services.runs.create(requestWithSession);
       const handle = services.startRun({
         runs: services.runs,
         runId: created.id,
-        request: parsed.request,
-        def
+        request: requestWithSession,
+        def,
+        resumeSessionId
       });
       services.activeHandles.set(created.id, handle);
       void handle.done.finally(() => {
@@ -138,6 +157,11 @@ export function createRunsRouter(services: RunsRouterServices): Router {
       const run = services.runs.statusBody(request.params.id);
       if (!run) {
         response.status(404).json({ error: "Run not found" });
+        return;
+      }
+
+      if (!services.runs.hasInMemoryRun(run.id)) {
+        response.status(409).json({ error: "Restored runs cannot be canceled" });
         return;
       }
 
@@ -194,10 +218,15 @@ function parseCreateRunRequest(input: unknown): { ok: true; request: CreateRunRe
     return { ok: false, error: "extraAllowedDirs must be an array of strings" };
   }
 
+  if (input.resumeSessionId !== undefined && input.resumeSessionId !== null && typeof input.resumeSessionId !== "string") {
+    return { ok: false, error: "resumeSessionId must be a string or null" };
+  }
+
   return {
     ok: true,
     request: {
       agentId: input.agentId,
+      resumeSessionId: input.resumeSessionId as string | null | undefined,
       prompt: input.prompt,
       model: input.model as string | null | undefined,
       reasoning: input.reasoning as string | null | undefined,
@@ -205,6 +234,17 @@ function parseCreateRunRequest(input: unknown): { ok: true; request: CreateRunRe
       extraAllowedDirs: input.extraAllowedDirs as string[] | undefined
     }
   };
+}
+
+function reusableSessionId(services: RunsRouterServices, def: ReturnType<AgentRegistry["get"]>, request: CreateRunRequest): string | null {
+  if (!def || (!def.resumesSessionViaCli && !def.resumesSessionViaAcpLoad && !def.capturesSessionIdFromStream)) {
+    return null;
+  }
+
+  return services.runs.findLatestSessionId({
+    agentId: request.agentId,
+    cwd: request.cwd ?? null
+  });
 }
 
 function parseStatusFilter(input: unknown): RunStatus | "active" | "invalid" | null {
@@ -222,6 +262,13 @@ function parseEventCursor(after: unknown, lastEventId: string | undefined): numb
 
 function isTerminalEvent(event: StoredRunEvent): boolean {
   return event.event === "end" && event.data.type === "end";
+}
+
+function encodeStoredSseEvent(event: StoredRunEvent): string {
+  return encodeSseEvent(event.id, event.event, event.data).replace(
+    `event: ${event.event}\n`,
+    `event: ${event.event}\ntimestamp: ${event.timestamp}\n`
+  );
 }
 
 function isObject(input: unknown): input is Record<string, unknown> {

@@ -41,10 +41,12 @@ async function detectLocalAgent(
     diagnostics.push(agentNotOnPathDiagnostic(def, resolution));
     return {
       id: def.id,
+      baseAgentId: def.baseAgentId,
       name: def.name,
       available: false,
       version: null,
       models: def.fallbackModels,
+      reasoningOptions: def.reasoningOptions,
       modelsSource: "fallback",
       authStatus: "unknown",
       diagnostics,
@@ -58,11 +60,13 @@ async function detectLocalAgent(
 
   return {
     id: def.id,
+    baseAgentId: def.baseAgentId,
     name: def.name,
     available: true,
     path: executablePath,
     version,
     models,
+    reasoningOptions: def.reasoningOptions,
     modelsSource,
     authStatus: auth.status,
     authMessage: auth.message,
@@ -198,10 +202,12 @@ async function invokeProbe(
 function detectionFailureAgent(def: RuntimeAgentDef, cause: unknown): DetectedAgent {
   return {
     id: def.id,
+    baseAgentId: def.baseAgentId,
     name: def.name,
     available: false,
     version: null,
     models: def.fallbackModels,
+    reasoningOptions: def.reasoningOptions,
     modelsSource: "fallback",
     authStatus: "unknown",
     diagnostics: [
