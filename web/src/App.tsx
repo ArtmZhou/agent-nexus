@@ -125,7 +125,13 @@ export default function App() {
     try {
       const response = await fetchRuns();
       setRunSummaries(response.runs);
-      const nextRun = response.runs.find((run) => run.id === selectedRunId) ?? response.runs[0] ?? null;
+      const selectedSummary = response.runs.find((run) => run.id === selectedRunId) ?? null;
+      if (!selectedSummary && selectedRunId === currentRun?.id && isRunActive(currentRun.status)) {
+        setLoadingRunEvents(false);
+        return;
+      }
+
+      const nextRun = selectedSummary ?? choosePreferredRun(response.runs);
       setSelectedRunId(nextRun?.id ?? null);
       if (nextRun && shouldReplayRunEvents(nextRun)) {
         void loadRunEvents(nextRun.id);
@@ -243,7 +249,7 @@ export default function App() {
             subscriptionRef.current?.close();
             void fetchRun(run.id)
               .then((latest) => {
-                setCurrentRun(latest);
+                setCurrentRun((previous) => previous?.id === latest.id ? latest : previous);
                 setRunSummaries((previous) =>
                   previous.map((item) => item.id === latest.id ? { ...item, ...latest } : item)
                 );
@@ -273,6 +279,10 @@ export default function App() {
   }
 
   function reusePrompt(prompt: string): void {
+    runEventsRequestRef.current += 1;
+    setSelectedRunId(null);
+    setLoadingRunEvents(false);
+    setRunEventsError(null);
     setConsoleState((previous) => ({ ...previous, prompt }));
   }
 
@@ -332,5 +342,13 @@ function chooseRunnableAgent(agents: DetectedAgent[], selectedAgentId: string | 
 }
 
 function shouldReplayRunEvents(run: RunSummary): boolean {
-  return run.status !== "queued" && run.status !== "running";
+  return !isRunActive(run.status);
+}
+
+function isRunActive(status: RunStatusBody["status"]): boolean {
+  return status === "queued" || status === "running";
+}
+
+function choosePreferredRun(runs: RunSummary[]): RunSummary | null {
+  return runs.find((run) => isRunActive(run.status)) ?? runs[0] ?? null;
 }

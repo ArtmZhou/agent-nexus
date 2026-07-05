@@ -42,9 +42,9 @@ export function RunInspector({ agentsConfig, run, onClose, variant = "drawer" }:
         )}
       </div>
 
-      {embedded && !expanded && (
-        <button type="button" className="ghost-button inspector-toggle" onClick={() => setExpanded(true)}>
-          Show inspector
+      {embedded && (
+        <button type="button" className="ghost-button inspector-toggle" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "Hide inspector" : "Show inspector"}
         </button>
       )}
 

@@ -40,18 +40,33 @@ export async function readRunEventsFromLog(eventsLogPath: string, afterEventId =
   try {
     const raw = await readFile(eventsLogPath, "utf8");
     const events: StoredRunEvent[] = [];
+    let malformed = false;
+    let lastSeenId = afterEventId;
 
     for (const line of raw.split(/\r?\n/u)) {
       if (!line.trim()) continue;
 
-      const parsed = JSON.parse(line) as unknown;
-      if (!isStoredRunEvent(parsed)) {
-        return [replayErrorEvent(afterEventId)];
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line) as unknown;
+      } catch {
+        malformed = true;
+        continue;
       }
 
+      if (!isStoredRunEvent(parsed)) {
+        malformed = true;
+        continue;
+      }
+
+      lastSeenId = Math.max(lastSeenId, parsed.id);
       if (parsed.id > afterEventId) {
         events.push(parsed);
       }
+    }
+
+    if (malformed) {
+      events.push(replayErrorEvent(lastSeenId));
     }
 
     return events;

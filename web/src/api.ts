@@ -90,12 +90,13 @@ export function subscribeRunEvents(
       const id = Number.parseInt((message as MessageEvent).lastEventId || "0", 10);
       if (Number.isFinite(id) && id > 0) latestId = id;
 
-      const data = parseRunEvent((message as MessageEvent).data);
+      const parsed = parseStoredRunEventPayload((message as MessageEvent).data);
+      const data = parsed.data;
       onEvent({
         id: Number.isFinite(id) && id > 0 ? id : latestId,
         event: eventType,
         data,
-        timestamp: Date.now()
+        timestamp: parsed.timestamp ?? Date.now()
       });
 
       if (data.type === "end") {
@@ -105,7 +106,9 @@ export function subscribeRunEvents(
   }
 
   source.onerror = (event) => {
-    onError?.(event);
+    if (source.readyState === EventSource.CLOSED) {
+      onError?.(event);
+    }
   };
 
   return {
@@ -124,16 +127,27 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function parseRunEvent(data: string): RunEvent {
+function parseStoredRunEventPayload(data: string): { data: RunEvent; timestamp?: number } {
   try {
-    return JSON.parse(data) as RunEvent;
+    const parsed = JSON.parse(data) as RunEvent & { timestamp?: unknown };
+    return {
+      data: stripSseTimestamp(parsed),
+      timestamp: typeof parsed.timestamp === "number" && Number.isFinite(parsed.timestamp) ? parsed.timestamp : undefined
+    };
   } catch {
     return {
-      type: "error",
-      message: "Unable to parse run event",
-      details: data
+      data: {
+        type: "error",
+        message: "Unable to parse run event",
+        details: data
+      }
     };
   }
+}
+
+function stripSseTimestamp(data: RunEvent & { timestamp?: unknown }): RunEvent {
+  const { timestamp: _timestamp, ...event } = data;
+  return event as RunEvent;
 }
 
 function parseSseEvents(input: string): StoredRunEvent[] {
@@ -145,12 +159,14 @@ function parseSseEvents(input: string): StoredRunEvent[] {
       const lines = chunk.split(/\r?\n/u);
       const id = Number.parseInt(lines.find((line) => line.startsWith("id: "))?.slice(4) ?? "0", 10);
       const event = lines.find((line) => line.startsWith("event: "))?.slice(7) ?? "message";
+      const timestamp = Number.parseInt(lines.find((line) => line.startsWith("timestamp: "))?.slice(11) ?? "", 10);
       const dataLine = lines.find((line) => line.startsWith("data: "));
+      const parsed = parseStoredRunEventPayload(dataLine?.slice(6) ?? "{}");
       return {
         id: Number.isFinite(id) ? id : 0,
         event,
-        data: parseRunEvent(dataLine?.slice(6) ?? "{}"),
-        timestamp: Date.now()
+        data: parsed.data,
+        timestamp: Number.isFinite(timestamp) ? timestamp : parsed.timestamp ?? Date.now()
       };
     });
 }

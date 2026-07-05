@@ -1,4 +1,5 @@
 import type { RunSummary } from "@agent-nexus/shared";
+import { AgentIcon } from "./AgentPicker.js";
 
 type HistoryRailProps = {
   runs: RunSummary[];
@@ -28,11 +29,17 @@ export function HistoryRail({ runs, selectedRunId, onSelect }: HistoryRailProps)
               aria-pressed={run.id === selectedRunId}
               onClick={() => onSelect(run.id)}
             >
-              <span className={`status-dot ${run.status}`} aria-hidden="true" />
+              <span className="history-agent-mark">
+                <AgentIcon agent={{ id: run.agentId, name: run.agentId, available: true, models: [], modelsSource: "fallback" }} />
+                <span className={`status-dot ${run.status}`} aria-hidden="true" />
+              </span>
               <span className="history-copy">
                 <strong>{run.prompt}</strong>
                 <span>
                   {run.agentId} / {run.model ?? "default model"} / {run.status}
+                </span>
+                <span>
+                  Updated {formatRunTime(run.updatedAt)}
                 </span>
               </span>
             </button>
@@ -41,4 +48,8 @@ export function HistoryRail({ runs, selectedRunId, onSelect }: HistoryRailProps)
       </div>
     </aside>
   );
+}
+
+function formatRunTime(timestamp: number): string {
+  return new Date(timestamp).toISOString().replace("T", " ").slice(0, 16);
 }

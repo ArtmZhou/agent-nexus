@@ -40,6 +40,7 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
   let acpSession: AttachedAcpSession | null = null;
   let cancelRequested = false;
   let completedCleanly = false;
+  let parserTerminalStatus: Extract<RunEvent, { type: "end" }>["status"] | null = null;
   let streamError: Extract<RunEvent, { type: "error" }> | null = null;
   let terminalPromiseResolve: (body: RunStatusBody) => void = () => undefined;
   const done = new Promise<RunStatusBody>((resolve) => {
@@ -82,6 +83,7 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
 
     const emit = (event: RunEvent) => {
       if (event.type === "end") {
+        parserTerminalStatus = event.status;
         completedCleanly = event.status === "succeeded";
         return;
       }
@@ -158,7 +160,8 @@ export function startAgentRun(options: StartAgentRunOptions): AgentRunHandle {
       acpCleanCompletion: acpSession?.completedSuccessfully() ?? false,
       artifactQuietShutdownRequested: false,
       artifactProducedThisRun: false,
-      turnCompletedCleanly: completedCleanly
+      turnCompletedCleanly: completedCleanly,
+      parserTerminalStatus
     });
 
     if (status === "succeeded") {

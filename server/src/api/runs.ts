@@ -82,7 +82,12 @@ export function createRunsRouter(services: RunsRouterServices): Router {
       if (closed || event.id <= afterCursor || sent.has(event.id)) return;
 
       sent.add(event.id);
-      response.write(encodeSseEvent(event.id, event.event, event.data));
+      try {
+        response.write(encodeStoredSseEvent(event));
+      } catch {
+        close();
+        return;
+      }
 
       if (isTerminalEvent(event)) {
         close();
@@ -257,6 +262,13 @@ function parseEventCursor(after: unknown, lastEventId: string | undefined): numb
 
 function isTerminalEvent(event: StoredRunEvent): boolean {
   return event.event === "end" && event.data.type === "end";
+}
+
+function encodeStoredSseEvent(event: StoredRunEvent): string {
+  return encodeSseEvent(event.id, event.event, event.data).replace(
+    `event: ${event.event}\n`,
+    `event: ${event.event}\ntimestamp: ${event.timestamp}\n`
+  );
 }
 
 function isObject(input: unknown): input is Record<string, unknown> {

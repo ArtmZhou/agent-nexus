@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { DetectedAgent } from "@agent-nexus/shared";
 
 type AgentPickerProps = {
@@ -17,11 +17,25 @@ const iconByAgentId: Record<string, string> = {
 export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }: AgentPickerProps) {
   const [open, setOpen] = useState(false);
   const listboxId = useId();
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
   const displayAgent = selectedAgent ?? agents[0] ?? null;
 
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [open]);
+
   return (
-    <div className="agent-picker">
+    <div className="agent-picker" ref={rootRef}>
       <span className="control-label" id={`${listboxId}-label`}>
         Agent
       </span>
@@ -55,7 +69,7 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
         <div
           className="agent-picker-menu"
           id={listboxId}
-          role="group"
+          role="listbox"
           aria-label="Agents"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
@@ -68,7 +82,8 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
             <button
               key={agent.id}
               type="button"
-              aria-pressed={agent.id === selectedAgentId}
+              role="option"
+              aria-selected={agent.id === selectedAgentId}
               aria-disabled={!agent.available}
               className={`agent-picker-option ${agent.id === selectedAgentId ? "selected" : ""}`}
               onClick={() => selectAgent(agent)}
@@ -97,7 +112,7 @@ export function AgentPicker({ agents, selectedAgentId, selectedModel, onSelect }
   }
 }
 
-function AgentIcon({ agent }: { agent: DetectedAgent | null }) {
+export function AgentIcon({ agent }: { agent: DetectedAgent | null }) {
   return (
     <span className="agent-icon" aria-hidden="true">
       {agentIcon(agent)}

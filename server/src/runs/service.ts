@@ -162,8 +162,8 @@ export function createRunService(options: RunServiceOptions = {}) {
     record.body.updatedAt = event.timestamp;
     if (data.type === "status" && data.sessionId) {
       record.body.sessionId = data.sessionId;
-      void upsertSummary(record);
     }
+    await upsertSummary(record);
     await persistEvent(record, event);
 
     for (const listener of record.listeners) {
@@ -208,6 +208,7 @@ export function createRunService(options: RunServiceOptions = {}) {
       .filter((summary) =>
         summary.id !== filter.excludeRunId &&
         summary.agentId === filter.agentId &&
+        summary.status === "succeeded" &&
         normalizeCwd(summary.cwd) === cwd &&
         typeof summary.sessionId === "string" &&
         summary.sessionId.trim().length > 0
@@ -370,7 +371,9 @@ export function createRunService(options: RunServiceOptions = {}) {
     summaryWriteQueue = summaryWriteQueue
       .catch(() => undefined)
       .then(() => writeRunIndex(options.runsLogDir!, listSummaries()))
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        console.error("Unable to persist run history index", error);
+      });
     return summaryWriteQueue;
   }
 
@@ -462,10 +465,15 @@ function normalizeCwd(cwd: string | null | undefined): string {
   const trimmed = (cwd ?? "").trim();
   if (!trimmed) return "";
 
-  let normalized = trimmed.replace(/\\/gu, "/").replace(/\/+/gu, "/");
+  const slashed = trimmed.replace(/\\/gu, "/");
+  const isUnc = slashed.startsWith("//") && !slashed.startsWith("///");
+  let normalized = slashed.replace(/\/+/gu, "/");
+  if (isUnc) {
+    normalized = `/${normalized}`;
+  }
   while (normalized.length > 3 && normalized.endsWith("/")) {
     normalized = normalized.slice(0, -1);
   }
 
-  return /^[a-z]:/iu.test(normalized) ? normalized.toLowerCase() : normalized;
+  return /^[a-z]:/iu.test(normalized) || normalized.startsWith("//") ? normalized.toLowerCase() : normalized;
 }

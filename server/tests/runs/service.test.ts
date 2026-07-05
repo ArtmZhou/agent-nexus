@@ -347,11 +347,37 @@ describe("createRunService", () => {
       runsLogDir
     });
     const run = service.create(request());
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(persistence, "writeRunIndex").mockRejectedValue(new Error("index unavailable"));
 
     await expect(service.finish(run.id)).resolves.toMatchObject({
       id: run.id,
       status: "succeeded"
+    });
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Unable to persist run history index",
+        expect.any(Error)
+      );
+    });
+  });
+
+  test("updates persisted summary timestamps when non-status events stream", async () => {
+    const runsLogDir = await tempDir();
+    let now = 100;
+    const service = createRunService({
+      idGenerator: () => "run_summary_freshness",
+      now: () => now,
+      runsLogDir
+    });
+    const run = service.create(request());
+
+    now = 250;
+    await service.emit(run.id, { type: "text_delta", delta: "still working" });
+
+    expect(service.listSummaries()[0]).toMatchObject({
+      id: run.id,
+      updatedAt: 250
     });
   });
 
@@ -458,7 +484,7 @@ describe("createRunService", () => {
     ]);
   });
 
-  test("returns a clear error event for malformed restored event logs", async () => {
+  test("keeps valid restored events around malformed JSONL lines", async () => {
     const runsLogDir = await tempDir();
     const firstService = createRunService({
       idGenerator: () => "run_malformed_log",
@@ -466,14 +492,30 @@ describe("createRunService", () => {
       runsLogDir
     });
     const run = firstService.create(request({ prompt: "malformed log" }));
-    await firstService.finish(run.id);
-    await writeFile(join(runsLogDir, "run_malformed_log.jsonl"), "{\"id\":1\n", "utf8");
+    await firstService.emit(run.id, { type: "text_delta", delta: "before corruption" });
+    await firstService.emit(run.id, { type: "text_delta", delta: "after corruption" });
+    await writeFile(join(runsLogDir, "run_malformed_log.jsonl"), [
+      JSON.stringify(firstService.eventsAfter(run.id, 0)[0]),
+      "{\"id\":2",
+      JSON.stringify(firstService.eventsAfter(run.id, 0)[1]),
+      ""
+    ].join("\n"), "utf8");
 
     const restoredService = createRunService({ runsLogDir });
 
-    await expect(restoredService.eventsAfterAsync(run.id, 5)).resolves.toEqual([
+    await expect(restoredService.eventsAfterAsync(run.id, 0)).resolves.toEqual([
       expect.objectContaining({
-        id: 6,
+        id: 1,
+        event: "text_delta",
+        data: { type: "text_delta", delta: "before corruption" }
+      }),
+      expect.objectContaining({
+        id: 2,
+        event: "text_delta",
+        data: { type: "text_delta", delta: "after corruption" }
+      }),
+      expect.objectContaining({
+        id: 3,
         event: "error",
         data: expect.objectContaining({
           type: "error",
@@ -482,6 +524,45 @@ describe("createRunService", () => {
         })
       })
     ]);
+  });
+
+  test("keeps UNC working paths distinct from ordinary absolute paths", async () => {
+    const service = createRunService({
+      idGenerator: () => "run_unc",
+      now: incrementingClock()
+    });
+    const run = service.create(request({ agentId: "codex", cwd: "\\\\server\\share\\repo" }));
+    await service.emit(run.id, { type: "status", label: "thread.started", sessionId: "unc-session" });
+    await service.finish(run.id);
+
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "//server/share/repo/"
+    })).toBe("unc-session");
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "/server/share/repo"
+    })).toBeNull();
+  });
+
+  test("does not reuse session ids from failed or canceled runs", async () => {
+    let nextId = 1;
+    const service = createRunService({
+      idGenerator: () => `run_reuse_status_${nextId++}`,
+      now: incrementingClock()
+    });
+    const failed = service.create(request({ agentId: "codex", cwd: "D:/repo" }));
+    await service.emit(failed.id, { type: "status", label: "thread.started", sessionId: "failed-session" });
+    await service.fail(failed.id, { message: "failed" });
+
+    const canceled = service.create(request({ agentId: "codex", cwd: "D:/repo" }));
+    await service.emit(canceled.id, { type: "status", label: "thread.started", sessionId: "canceled-session" });
+    await service.cancel(canceled.id);
+
+    expect(service.findLatestSessionId({
+      agentId: "codex",
+      cwd: "D:/repo"
+    })).toBeNull();
   });
 });
 
